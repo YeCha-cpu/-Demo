@@ -87,6 +87,13 @@ protected:
 	void OnSprintStarted();
 	void OnSprintCompleted();
 
+	// ── 过渡期输入回调 ──
+	// Jump 和 Sprint 最终会变成 GA（阶段 3），届时这两个回调连同绑定一起删除。
+	// 详见 SetupInputComponent 里 IsInterimNativeInput 的说明。
+
+	void OnJumpStarted();
+	void OnJumpCompleted();
+
 	// ── 能力类输入回调（所有能力共用，靠绑定时传入的标签区分）──
 
 	void OnAbilityInputPressed(FGameplayTag InputTag);

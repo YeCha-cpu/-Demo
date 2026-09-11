@@ -14,6 +14,7 @@
 - [步骤 5 · 蓝图（4 个）](#步骤-5--蓝图4-个)
 - [步骤 6 · 测试关卡](#步骤-6--测试关卡)
 - [步骤 7 · 验收](#步骤-7--验收)
+- [步骤 8 · 联机测试（双客户端）](#步骤-8--联机测试双客户端)
 - [常见问题排查](#常见问题排查)
 
 ---
@@ -103,6 +104,26 @@
 > ⚠️ `Input Tag` 字段有标签选择器，直接搜 `Input.` 就能看到我们在 C++ 里注册的标签。
 > **如果搜不到任何 `Input.*` 标签**，说明 GameplayTags 没注册成功——重新编译一次即可，
 > 这些标签是编译期注册的（见 `Source/RPG/Core/RPG_GameplayTags.cpp`）。
+
+### 每个输入标签的处理位置（配置时对照这张表）
+
+| 输入标签 | 代码里怎么处理 | 现在能用吗 |
+|---|---|---|
+| `Input.Jump` | 过渡期原生绑定（`OnJumpStarted` / `OnJumpCompleted`）→ 阶段 3 换成 `GA_Jump` | ✅ 能跳 |
+| `Input.Sprint` | 过渡期原生绑定（`OnSprintStarted` / `OnSprintCompleted`）→ 阶段 3 换成 `GA_Sprint` | ✅ 能跑 |
+| `Input.Crouch` | **不走 GAS**，配在 `DA_RPG_InputConfig` 的 `Locomotion → Crouch Action` 字段 | ✅ 能蹲 |
+| `Input.Attack.Light` | 能力循环 → `GA_LightAttack` | ⏳ 阶段 2 |
+| `Input.Attack.Heavy` | 能力循环 → `GA_HeavyAttack` | ⏳ 阶段 2 |
+| `Input.Dodge` | 能力循环 → `GA_Dodge` | ⏳ 阶段 2 |
+| `Input.Spell.1 / 2 / 3` | 能力循环 → `GA_Spell_*` | ⏳ 阶段 6 |
+
+> ⚠️ **`Input.Crouch` 是唯一不走 GAS 的标签**——蹲伏不消耗耐力、没有冷却、不会被技能打断，
+> 走 GAS 是纯负担。所以它配在 `Crouch Action` 字段里，**不要**配到
+> `Ability Input Mappings` 数组里（配了也不会生效，只会在启动日志里留一条 Warning）。
+>
+> 📌 **Stage 1 只有 Jump / Sprint / Crouch 能实际动作**。攻击和闪避配了也按不出东西，
+> 因为 `GA_LightAttack` 等是阶段 2 的产物——那时候日志会从
+> `输入绑定完成：5 个能力输入` 变成真正的能力激活记录。
 
 ---
 
@@ -221,7 +242,7 @@ File → New Level → 选 **Basic**（或 Empty Level），保存为 `L_RPG_Tes
 |---|---|---|
 | 1 | 移动鼠标 | 视角转动，弹簧臂跟随 |
 | 2 | 按 `W` / `A` / `S` / `D` | 角色相对镜头方向移动，身体自动转向移动方向 |
-| 3 | 按 `Space` | 角色跳跃（阶段 1 还是原生跳跃，阶段 2 会改成消耗耐力的 GA） |
+| 3 | 按 `Space` | 角色跳跃。短按跳得低、长按跳得高（可变高度跳跃） |
 | 4 | 按 `Left Shift` | 移动速度明显变快 |
 | 5 | 按 `Left Ctrl` | 角色蹲下，再按起立 |
 | 6 | 按 `~` 打开控制台，输入 `RPGPrintAttributes` | 屏幕左上角显示 8 项属性，生命 100/100、攻击 10、防御 10 |

@@ -192,15 +192,54 @@ void ARPG_PlayerController::SetupInputComponent()
 		UE_LOG(LogRPG, Warning, TEXT("  ├─ Crouch  ✗ 未绑定（InputConfig 里 Crouch Action 为空）"));
 	}
 
-	// 奔跑是"按住"型：Started 开始、Completed 结束。
-	// 阶段 2 会改走 GA_Sprint（因为要持续消耗耐力），届时这两个回调
-	// 只负责转成输入标签，不再直接改速度。
+	// ══════════════════════════════════════════════════════════════════
+	//  过渡期输入 —— 最终会走 GAS，但对应的 GA 还没写出来
+	// ══════════════════════════════════════════════════════════════════
+	// Jump 和 Sprint 在最终设计里都是 GA（要消耗耐力、有前后摇），但那属于阶段 3。
+	// 在那之前，如果只把它们留在下面的能力循环里，按键会**静默失败** ——
+	// ASC 找不到对应能力，TryActivateAbilityByInputTag 直接返回 false，不报任何错。
+	//
+	// 所以这里临时绑到角色的原生行为上，让阶段 1 能验证"能跑能跳"。
+	// 每做好一个 GA，把它从这个判断里删掉即可 —— 它会自动回到能力循环那条
+	// 正规路径，不需要改动其他代码。
+	const auto IsInterimNativeInput = [](const FGameplayTag& Tag)
+	{
+		return Tag == RPGTags::Input_Jump || Tag == RPGTags::Input_Sprint;
+	};
+
+	// ── Jump ──
+	// 走 ACharacter 的原生跳跃。联机下同样可用：CharacterMovementComponent
+	// 内部通过 ServerMove 机制同步，不需要我们额外处理。
+	if (const UInputAction* JumpAction = InputConfig->FindActionForInputTag(RPGTags::Input_Jump))
+	{
+		EIC->BindAction(JumpAction, ETriggerEvent::Started, this,
+			&ARPG_PlayerController::OnJumpStarted);
+		EIC->BindAction(JumpAction, ETriggerEvent::Completed, this,
+			&ARPG_PlayerController::OnJumpCompleted);
+		UE_LOG(LogRPG, Log, TEXT("  ├─ Jump    → %s（过渡期：原生跳跃，阶段 3 换 GA_Jump）"),
+			*JumpAction->GetName());
+	}
+	else
+	{
+		UE_LOG(LogRPG, Warning,
+			TEXT("  ├─ Jump    ✗ 未绑定（DA_RPG_InputConfig 里没有映射到 Input.Jump 的条目）"));
+	}
+
+	// ── Sprint ──
+	// "按住"型：Started 开始、Completed 结束。
 	if (const UInputAction* SprintAction = InputConfig->FindActionForInputTag(RPGTags::Input_Sprint))
 	{
 		EIC->BindAction(SprintAction, ETriggerEvent::Started, this,
 			&ARPG_PlayerController::OnSprintStarted);
 		EIC->BindAction(SprintAction, ETriggerEvent::Completed, this,
 			&ARPG_PlayerController::OnSprintCompleted);
+		UE_LOG(LogRPG, Log, TEXT("  ├─ Sprint  → %s（过渡期：直接改速度，阶段 3 换 GA_Sprint）"),
+			*SprintAction->GetName());
+	}
+	else
+	{
+		UE_LOG(LogRPG, Warning,
+			TEXT("  ├─ Sprint  ✗ 未绑定（DA_RPG_InputConfig 里没有映射到 Input.Sprint 的条目）"));
 	}
 
 	// ══════════════════════════════════════════════════════════════════
@@ -216,6 +255,11 @@ void ARPG_PlayerController::SetupInputComponent()
 		// 跳过没配全的条目 —— 编辑资产时必然有"填了一半"的状态，
 		// 这里静默跳过；真正的配置错误会在输入失效时暴露出来。
 		if (!Mapping.InputAction || !Mapping.InputTag.IsValid())
+			continue;
+
+		// 过渡期输入已经在上面的原生绑定里处理过了。
+		// **必须跳过** —— 否则按一次键会触发两遍（原生行为 + 尝试激活能力）。
+		if (IsInterimNativeInput(Mapping.InputTag))
 			continue;
 
 		EIC->BindAction(Mapping.InputAction, ETriggerEvent::Started, this,
@@ -273,6 +317,26 @@ void ARPG_PlayerController::OnSprintCompleted()
 	if (ARPG_BaseCharacter* RPGChar = GetRPGCharacter())
 	{
 		RPGChar->StopSprint();
+	}
+}
+
+void ARPG_PlayerController::OnJumpStarted()
+{
+	if (ARPG_BaseCharacter* RPGChar = GetRPGCharacter())
+	{
+		// ACharacter::Jump() 内部会做 CanJump() 检查（是否在空中、能否起跳），
+		// 不需要我们再判断一次。
+		RPGChar->Jump();
+	}
+}
+
+void ARPG_PlayerController::OnJumpCompleted()
+{
+	if (ARPG_BaseCharacter* RPGChar = GetRPGCharacter())
+	{
+		// 松开跳跃键时通知，实现"可变高度跳跃"——短按跳得低、长按跳得高。
+		// 这是平台跳跃手感的基础，对 ARPG 里"跳跃接闪避/接攻击"的衔接也有帮助。
+		RPGChar->StopJumping();
 	}
 }
 
