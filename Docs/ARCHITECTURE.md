@@ -1407,16 +1407,30 @@ Content/RPG/
 > 以保证工程随时可打开运行。阶段 1 建好 `RPG_Player` / `RPG_GameModeBase` 并切换
 > `Config/DefaultEngine.ini` 的默认类后，一并删除。
 
-### 阶段 1 · 角色 + GAS 骨架（预计 1~1.5 天）
+### 阶段 1 · 角色 + GAS 骨架 —— ✅ 代码已完成（2026-09-11）
 
-- [ ] `Interfaces/` 两个接口 + `RPG_AbilitySystemLibrary`
-- [ ] `RPG_AttributeSet`（8 属性 + 元属性 + clamp + 委托广播）
-- [ ] `RPG_AbilitySystemComponent`（输入标签 → 能力映射表）
-- [ ] `RPG_BaseCharacter`（弹簧臂、相机、移动参数、组件持有）
-- [ ] `RPG_Player` + `RPG_PlayerController`（增强输入、IMC）+ `RPG_PlayerState`（ASC 宿主）
-- [ ] `RPG_Enemy`（自持 ASC）+ `RPG_AIController`（占位）
-- [ ] `GE_InitAttributes`（蓝图资产）
-- [ ] **✅ 验收：能跑能跳能转视角；按调试键在屏幕上打印 ASC 全部属性值**
+- [x] `IRPG_AbilitySystemInterface` —— 只补充引擎接口没有的（属性集、存活判定），
+      **不重复**定义 `GetAbilitySystemComponent()`（那是引擎 `IAbilitySystemInterface` 的职责）
+- [x] `URPG_AbilitySystemLibrary` —— `GetRPGAttributeSet` / `IsAlive` / `HasGameplayTag`
+      （引擎的 `UAbilitySystemComponent::GetSetOnActor<T>()` 是模板函数，蓝图用不了，故包一层）
+- [x] `RPG_AttributeSet`（8 属性 + 元属性 + clamp + 伤害统一落地）
+- [x] `RPG_AbilitySystemComponent`（`InputTag → FGameplayAbilitySpecHandle` 映射表）
+- [x] `RPG_BaseCharacter`（弹簧臂、相机、移动参数、接口默认实现）
+- [x] `RPG_Player`（ASC 在 PlayerState，幂等初始化）+ `RPG_PlayerState`（ASC 宿主）
+- [x] `RPG_Enemy`（自持 ASC）
+- [x] `RPG_PlayerController`（全部输入绑定，**一个回调处理所有能力输入**）
+- [x] `RPG_GameModeBase`
+- [x] `URPG_InputConfig`（PrimaryDataAsset：InputAction ↔ GameplayTag）
+- [x] 清理模板主类与 `Content/ThirdPerson`，切换 `DefaultEngine.ini` 默认类
+- [x] **代码验收：编译通过**
+
+> 📌 **与原计划的偏差**（都是主动简化的）：
+> - `RPG_AIController` 挪到阶段 4 —— 阶段 1 没有 AI 需求，不建空类
+> - 调试手段用**控制台命令**（`RPGPrintAttributes` / `RPGPrintTags`）而不是绑定按键 ——
+>   不需要任何输入资产就能用，也不占用输入映射
+> - `GE_InitAttributes` 与各类蓝图需要**你在编辑器里创建**，
+>   详细步骤见 [`Docs/PHASE1_EDITOR_SETUP.md`](./PHASE1_EDITOR_SETUP.md)
+> - ⏳ **待你验收**：编辑器资产建好、PIE 里能跑能跳、控制台能打出属性
 
 ### 阶段 2 · 战斗核心（预计 2~3 天）
 
