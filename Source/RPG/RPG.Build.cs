@@ -14,38 +14,45 @@ public class RPG : ModuleRules
 			"Engine",
 			"InputCore",
 			"EnhancedInput",
+
+			// ── GAS 三件套 ──
+			// GameplayAbilities: ASC / GameplayAbility / GameplayEffect / GameplayCue / AttributeSet
+			// GameplayTags:      FGameplayTag 与原生标签定义宏（UE_DEFINE_GAMEPLAY_TAG_*）
+			// GameplayTasks:     UAbilityTask 的基类 UGameplayTask 所在模块，缺它 AbilityTask 编译不过
+			"GameplayAbilities",
+			"GameplayTags",
+			"GameplayTasks",
+
+			// ── AI ──
+			// AIModule:          AIController / BehaviorTree / Blackboard / AIPerception
+			// NavigationSystem:  UBTService 中做寻路查询与 MoveTo 需要
 			"AIModule",
+			"NavigationSystem",
+
+			// ── UI ──
+			"UMG",
+			"Slate",
+			"SlateCore",
+
+			// ── 特效 ──
+			"Niagara",
+
+			// 工程已启用这两个插件但当前未使用。
+			// 保留依赖是为了阶段 4 若要把行为树换成 StateTree 时无需回头改 Build.cs。
 			"StateTreeModule",
 			"GameplayStateTreeModule",
-			"UMG",
-			"Slate"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
 
-		PublicIncludePaths.AddRange(new string[] {
-			"RPG",
-			"RPG/Variant_Platforming",
-			"RPG/Variant_Platforming/Animation",
-			"RPG/Variant_Combat",
-			"RPG/Variant_Combat/AI",
-			"RPG/Variant_Combat/Animation",
-			"RPG/Variant_Combat/Gameplay",
-			"RPG/Variant_Combat/Interfaces",
-			"RPG/Variant_Combat/UI",
-			"RPG/Variant_SideScrolling",
-			"RPG/Variant_SideScrolling/AI",
-			"RPG/Variant_SideScrolling/Gameplay",
-			"RPG/Variant_SideScrolling/Interfaces",
-			"RPG/Variant_SideScrolling/UI"
-		});
+		// ★ Feature Folder 结构的前提 ★
+		// 把模块根目录加入 include 搜索路径，让下面这种"从模块根开始"的写法生效：
+		//     #include "AbilitySystem/Abilities/RPG_GA_LightAttack.h"
+		//     #include "Core/RPG_GameplayTags.h"
+		// 好处：include 路径自带层级信息，一眼看出文件属于哪一层，且不会与引擎头文件重名。
+		PublicIncludePaths.Add(ModuleDirectory);
 
-		// Uncomment if you are using Slate UI
-		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
-
-		// Uncomment if you are using online features
-		// PrivateDependencyModuleNames.Add("OnlineSubsystem");
-
-		// To include OnlineSubsystemSteam, add it to the plugins section in your uproject file with the Enabled attribute set to true
+		// 注意：不要用 Public/Private 镜像结构了。那套机制是为插件/跨模块依赖设计的
+		// （Public/ 下的头文件会自动加入依赖方的 include 路径），单一游戏模块用不上。
 	}
 }

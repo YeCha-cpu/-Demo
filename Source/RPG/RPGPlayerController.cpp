@@ -2,6 +2,9 @@
 
 
 #include "RPGPlayerController.h"
+// 临时补丁：日志类别已拆分并迁至 Core/RPG_LogChannels.h。
+// 本文件属于第三人称模板遗留代码，将在阶段 1 建立 RPG_PlayerController 后连同 Content/ThirdPerson 一并删除。
+#include "Core/RPG_LogChannels.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "InputMappingContext.h"
