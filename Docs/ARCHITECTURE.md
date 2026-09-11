@@ -1,7 +1,7 @@
 # RPG 项目架构设计文档
 
-> UE 5.8 · 单机 ARPG · GAS 驱动 · 求职作品集
-> 版本 v1.0 · 2026-09-11
+> UE 5.8 · 联机 ARPG（Listen Server）· GAS 驱动 · 求职作品集
+> 版本 v2.0 · 2026-09-12
 
 ---
 
@@ -20,7 +20,8 @@
 11. [资产命名与 Content 规划](#11-资产命名与-content-规划)
 12. [实施路线图](#12-实施路线图)
 13. [面试技术亮点](#13-面试技术亮点)
-14. [附录：待决策事项](#14-附录待决策事项)
+14. [网络联机设计](#14-网络联机设计)
+15. [附录：待决策事项](#15-附录待决策事项)
 
 ---
 
@@ -38,15 +39,29 @@
 | 可讲解 | 每个设计能回答"为什么这么做"和"替代方案是什么" |
 | 可扩展 | 加一把新武器只需新增 DataAsset，不改代码 |
 
-### 1.2 明确不做（MVP 范围控制）
+### 1.2 联机范围（v2.0 起）
 
-- ❌ **网络联机 / 复制**——所有 `GetLifetimeReplicatedProps` 相关的复制逻辑不写，但**保留正确的 ASC 归属设计**，将来要加联机不用重构
+**做 L1 + L2，不做 L3。**
+
+| 层 | 内容 | 状态 |
+|---|---|---|
+| **L1 基础复制** | 属性集 `ReplicatedUsing` + `OnRep_*`、ASC 复制开关、服务器/客户端权威分支 | ✅ 阶段 1 已实现 |
+| **L2 权威与预测** | GA 的 `NetExecutionPolicy`、伤害服务器权威判定、蒙太奇与 GameplayCue 全端同步 | 阶段 2 实现 |
+| **L3 进阶** | 延迟补偿、位置回滚、专用服务器、网络平滑调参 | ❌ 不做 |
+
+- **主模式：Listen Server** —— PIE 里设 `Number of Players = 2` + `Net Mode = Play As Listen Server` 即可测试，不需要额外打包 Dedicated Server
+- **保留单机自动降级** —— `NetMode == Standalone` 时跳过所有联机分支，一个人也能快速迭代
+
+> ⚠️ **为什么砍掉 L3**：延迟补偿和位置回滚是"上线游戏"才需要的东西，MVP 阶段投入产出比很差。
+> 更现实的问题是——**没做过真实网络环境测试的话，面试被追问细节很容易露馅**。
+> 在简历上写"了解延迟补偿的原理"比写"实现了延迟补偿"更安全。
+
+### 1.3 其他不做
+
 - ❌ **存档 / 关卡流程 / 任务系统**
 - ❌ **格挡**——本期不做，架构预留 `State.Blocking` 标签位与 `GA_Block` 类名
 - ❌ **复杂的 UI**——只做属性条 HUD
 - ❌ **美术资源制作**——用引擎自带 Mannequin + 商城免费动画
-
-> ⚠️ 关于"不做联机但保留正确设计"：ASC 放在 `PlayerState` 上而不是 `Character` 上，是**联机场景下的唯一正确解**。单机时放哪都行，但放 PlayerState 能让你在面试时讲清楚"为什么"——这是白送的分。同理，所有属性修改走 GE 而不是直接赋值，也是复制友好设计。
 
 ---
 
@@ -82,7 +97,7 @@ Source/RPG/
 ├── RPGModule.cpp                           
 │
 ├── Core/                                   ── 游戏框架层：不属于任何具体玩法的骨架
-│   ├── RPG_GameModeBase.h/.cpp             指定默认类、无网络
+│   ├── RPG_GameModeBase.h/.cpp             指定默认类（GameMode 只在服务器存在）
 │   ├── RPG_PlayerState.h/.cpp              ★ 玩家 ASC 宿主
 │   ├── RPG_PlayerController.h/.cpp         ★ 增强输入、输入标签路由
 │   ├── RPG_GameplayTags.h/.cpp             ★ 全部原生 GameplayTag 的 C++ 声明
@@ -260,7 +275,7 @@ classDiagram
 > **为什么玩家的 ASC 不放 Character？**
 > 三个理由，面试可直接讲：
 > 1. **死亡与重生**：角色死亡时 Character 会被销毁，如果 ASC 在上面，技能冷却、Buff 剩余时间、属性全丢。放 PlayerState 上，重生后状态延续。
-> 2. **复制友好**：`PlayerState` 是网络复制中天然跟随玩家的 Actor，ASC 需要复制时挂它下面最省事（本项目不做联机，但设计对齐标准做法）。
+> 2. **复制正确**：`PlayerState` 是网络复制中天然跟随玩家的 Actor，ASC 挂在它下面，重生时属性、冷却、Buff 会自动同步到客户端。这也是本项目后来能顺利加上联机的基础——不需要重构。
 > 3. **逻辑归属**：ASC 的 `OwnerActor` 是"这个能力属于谁"的逻辑答案，`AvatarActor` 是"这个能力通过什么身体表现"的答案。玩家死后还可以有 Owner（魂），但不一定有 Avatar（身体）。
 >
 > 敌人为什么反过来放自己身上？因为敌人的生命周期和自己的 ASC 完全一致——死了一起销毁，没有重生需求，也没有跨 Actor 的状态延续问题。
@@ -1422,6 +1437,9 @@ Content/RPG/
 - [x] `RPG_GameModeBase`
 - [x] `URPG_InputConfig`（PrimaryDataAsset：InputAction ↔ GameplayTag）
 - [x] 清理模板主类与 `Content/ThirdPerson`，切换 `DefaultEngine.ini` 默认类
+- [x] **L1 联机复制**（v2.0 追加）：属性集 8 属性的 `ReplicatedUsing` + `OnRep_*` +
+      `DOREPLIFETIME_CONDITION_NOTIFY`；ASC `SetIsReplicated(true)`；
+      Player/Enemy 的 `HasAuthority()` 权威分支；PlayerController 的 `IsLocalController()` 守卫
 - [x] **代码验收：编译通过**
 
 > 📌 **与原计划的偏差**（都是主动简化的）：
@@ -1442,7 +1460,10 @@ Content/RPG/
 - [ ] AnimNotify 全家桶（AttackWindow / ComboWindow / AttackEnd）
 - [ ] `RPG_DamageExecution` + `GE_Damage` + `GCN_HitImpact`
 - [ ] `RPG_GA_Dodge`（冲量 + 无敌帧）
-- [ ] **✅ 验收：5 段连击可打出、蓄力重击生效、翻滚有无敌帧、命中掉血有特效**
+- [ ] **L2 联机**：GA 的 `NetExecutionPolicy`（攻击/闪避用 `LocalPredicted`，敌人 AI 用 `ServerOnly`）
+      + `NetSecurityPolicy`；伤害判定放服务器；GameplayCue 走 GE 复制而非手动 `SpawnActor`
+- [ ] **✅ 验收：5 段连击可打出、蓄力重击生效、翻滚有无敌帧、命中掉血有特效；
+      PIE 双客户端下属性同步正确、伤害由服务器权威判定**
 
 ### 阶段 3 · 资源系统（预计 0.5~1 天）
 
@@ -1495,12 +1516,153 @@ Content/RPG/
 | 10 | **数据驱动** | 攻击模组 DataAsset；加武器零代码 |
 | 11 | **AI 等待技能** | Latent Task 模式；为什么不能发完请求就返回 Succeeded |
 | 12 | **架构分层** | Feature Folder vs Public/Private；依赖方向；接口隔离 |
+| 13 | **属性集复制三件套** | `ReplicatedUsing` / `OnRep_*` / `DOREPLIFETIME` 各管什么；漏掉 `OnRep` 为什么难查 |
+| 14 | **复制条件的选择** | `COND_None` vs `COND_OwnerOnly`；`REPNOTIFY_Always` vs `REPNOTIFY_OnChanged`，以及 GAS 属性两层值带来的影响 |
+| 15 | **谁产生状态，谁消费状态** | 客户端为什么不能自己 `GiveAbility`；"放一次技能触发两遍效果"是怎么来的 |
+| 16 | **预测与权威的边界** | 客户端命中判定只为手感、真实伤害必须来自服务器复制；`LocalPredicted` 的代价与预测失败的处理 |
+| 17 | **联机调试方法** | PIE 双客户端配置；`showdebug abilitysystem` 的用法；"单机正常、联机才暴露"这类 bug 的排查思路 |
 
 > 💡 **用法建议**：面试时不要一口气全讲。挑 2~3 个和岗位最相关的深入讲，其余作为"我还做了这些"的引子。**主动说出取舍和替代方案的缺点**，比只讲自己的实现更有说服力——那说明你是在做工程决策，而不是照抄教程。
 
 ---
 
-## 14. 附录：待决策事项
+## 14. 网络联机设计
+
+### 14.1 复制策略：谁产生状态，谁消费状态
+
+**核心原则：状态由服务器产生，客户端只消费复制结果。**
+
+```
+服务器                                        客户端
+─────────────────────────────────────────     ──────────────────────────────────
+InitAbilityActorInfo(PS, Character)           InitAbilityActorInfo(PS, Character)
+  ↑ 两边都要做 —— 客户端也要知道 Owner/Avatar 是谁
+
+GiveAbility(...)                              ✗ 不做，等复制
+ApplyGameplayEffect(InitAttributes)           ✗ 不做，等属性复制
+属性变化 ═══ 自动复制 ═══════════════════════→ OnRep_Xxx → 更新本地值 + 广播委托
+```
+
+**客户端如果自作主张也调一遍 `GiveAbility` 会怎样？**
+
+会和复制过来的那份**重复**，产生两个同能力实例。症状是"放一次技能触发两遍效果"，
+而且**只在联机时出现**——单机 PIE 永远测不出来。这类 bug 是联机开发里最耗时间的。
+
+所以 `ARPG_Player::InitializeAbilitySystem()` 和 `ARPG_Enemy::InitializeAbilitySystem()`
+里都有一道 `if (!HasAuthority()) return;` 的守卫，把授予能力和应用初始属性挡在服务器侧。
+而 `InitAbilityActorInfo` **在守卫之前**（两边都要执行）——这个顺序不能反。
+
+### 14.2 属性集复制（已实现）
+
+每个需要同步的属性都要"三件套"：
+
+```cpp
+// ① 声明要同步 + 绑定回调
+UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Health", ReplicatedUsing = OnRep_Health)
+FGameplayAttributeData Health;
+ATTRIBUTE_ACCESSORS_BASIC(URPG_AttributeSet, Health);
+
+// ② 客户端收到新值时的处理
+UFUNCTION() virtual void OnRep_Health(const FGameplayAttributeData& OldHealth);
+
+// ③ 注册复制规则
+DOREPLIFETIME_CONDITION_NOTIFY(URPG_AttributeSet, Health, COND_None, REPNOTIFY_Always);
+```
+
+**两个参数选择的理由**：
+
+| 参数 | 取值 | 为什么 |
+|---|---|---|
+| 复制条件 | `COND_None` | 血条要给别人看（队友状态、敌人血量），不能用 `COND_OwnerOnly` |
+| 通知策略 | `REPNOTIFY_Always` | GAS 属性有 BaseValue / CurrentValue 两层，表面数值没变时底层状态可能已经变了（Buff 叠加）。用 Always 保证客户端不漏更新，代价只是极少量冗余回调 |
+
+**最容易漏的是第 ② 步**：漏了它**不会编译报错**，但客户端**数值同步了、回调不触发**——
+UI 不刷新、依赖属性变化的逻辑不执行。表现是"血条不动但实际血量已经变了"。
+
+**元属性 `IncomingDamage` 有意不复制**：它只是服务器上伤害计算的临时投递口，
+用完立即清零，同步它没有意义、还浪费带宽。
+
+### 14.3 GA 的预测策略（阶段 2 实现）
+
+`UGameplayAbility::NetExecutionPolicy` 的四个取值：
+
+| 策略 | 行为 | 本项目用于 |
+|---|---|---|
+| `LocalOnly` | 只在本地跑 | 纯表现（UI 反馈） |
+| `LocalPredicted` | 客户端先跑，服务器验证 | **攻击、闪避、奔跑** —— 要求手感跟手 |
+| `ServerOnly` | 只在服务器跑 | **敌人 AI 的能力**、掉落判定 |
+| `ServerInitiated` | 服务器发起，客户端执行 | 被控制、击退 |
+
+**近战攻击用 `LocalPredicted`**：玩家按下攻击键后立刻在本地播动画（不等服务器往返），
+服务器同时执行一份权威版本。代价是要处理"预测失败"——比如客户端以为耐力够，
+服务器判定不够，此时客户端要把已经播出去的动画收回。
+
+配套的 `NetSecurityPolicy` 决定"谁有权请求激活"：
+- `ClientOrServer` —— 允许客户端主动请求（攻击、闪避）
+- `ServerOnly` —— 拒绝客户端请求，防伪造（敌人 AI 的能力）
+
+### 14.4 伤害的权威判定
+
+**伤害必须在服务器算。** 客户端算伤害 = 客户端改内存就能随便秒杀。
+
+```
+客户端（LocalPredicted GA）             服务器（权威 GA）
+─────────────────────────────         ────────────────────────────────
+播放蒙太奇                             播放蒙太奇（多播，所有人可见）
+预测性播放命中特效                     实际执行 WeaponTrace
+  ↑ 只为手感，不产生真实伤害            实际 ApplyGameplayEffect(GE_Damage)
+                                          ↓
+                                      属性集变化 ══ 复制 ══→ 所有客户端
+                                          ↓
+                                      客户端 OnRep_Xxx + GameplayCue
+```
+
+**关键点**：客户端的命中判定只用于"立刻给玩家反馈"（顿帧、音效、特效），
+**真实伤害永远来自服务器的复制结果**。
+
+### 14.5 GameplayCue 的全端播放
+
+GC 是**唯一必须广播到所有客户端**的东西——特效音效要让所有人都看到，
+不能只有攻击者自己看得见。
+
+GAS 的处理方式：
+- GE 上的 `GameplayCues` 数组随 GE 一起复制到客户端，由客户端的 `UGameplayCueManager` 触发
+- `GameplayCueNotify_Actor` 内部走 `NetMulticast` RPC
+
+⚠️ **不要在 GA 里手动 `SpawnActor` 播特效**——那样只有服务器能看到，
+而且单机测试时完全正常，是个典型的"联机才暴露"的坑。
+
+### 14.6 联机调试方法
+
+**PIE 双客户端**：
+1. Play 按钮旁的下拉箭头 → `Advanced Settings`（或编辑器偏好设置里改）
+2. `Number of Players` = **2**
+3. `Net Mode` = **Play As Listen Server**
+4. 窗口布局选 `Two Players Side by Side`
+
+**调试命令**：
+
+| 命令 | 用途 |
+|---|---|
+| `showdebug abilitysystem` | 查看某个 ASC 的全部属性、激活的 GE、标签 —— 联机调试神器 |
+| `AbilitySystem.Debug.NextTarget` | 切换要查看的 ASC（配合上面那条） |
+| `stat net` | 网络带宽与延迟 |
+| `Log LogRPG_Ability VeryVerbose` | 打开能力系统日志 |
+| `net.Ping` | 显示延迟 |
+
+**常见症状速查**：
+
+| 症状 | 最可能的原因 |
+|---|---|
+| 客户端技能没反应，服务器正常 | GA 的 `NetExecutionPolicy` 配错，或 ASC 没开 `SetIsReplicated` |
+| 放一次技能触发两遍 | 客户端也调了 `GiveAbility`，与复制过来的重复 |
+| 属性变了但 UI 不动 | 属性漏了 `ReplicatedUsing` / `OnRep_*` |
+| 特效只有自己看得见 | GameplayCue 没走复制（手动 SpawnActor 了） |
+| 敌人在客户端不动 | AI 逻辑没加 `HasAuthority()` 守卫 |
+
+---
+
+## 15. 附录：待决策事项
 
 以下几点我按最佳实践做了预设，但如果你有不同想法，现在改成本最低：
 
@@ -1517,7 +1679,7 @@ Content/RPG/
 
 ---
 
-## 15. 附录 B：UE 5.8 API 核查速查表
+## 16. 附录 B：UE 5.8 API 核查速查表
 
 > 以下全部基于本地 `D:\UE5\UE_5.8\Engine` 源码逐行核实，**不是凭记忆**。
 > 写代码卡住时先查这张表——GAS 的网上资料 90% 来自 UE4/UE5.0~5.3，照抄会编译失败。

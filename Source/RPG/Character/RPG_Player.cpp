@@ -57,10 +57,7 @@ UAbilitySystemComponent* ARPG_Player::GetASCInternal() const
 
 void ARPG_Player::InitializeAbilitySystem()
 {
-	if (bAbilitySystemInitialized)
-	{
-		return;
-	}
+	if (bAbilitySystemInitialized) return;
 
 	APlayerState* PS = GetPlayerState();
 	if (!PS)
@@ -87,8 +84,32 @@ void ARPG_Player::InitializeAbilitySystem()
 	// GE 的来源判定算谁 —— 传反了会导致一堆诡异问题（比如 Cue 播在 PlayerState 位置上）。
 	ASC->InitAbilityActorInfo(PS, this);
 
-	UE_LOG(LogRPG_Ability, Log, TEXT("[%s] GAS 初始化完成（Owner=%s）"),
-		*GetName(), *PS->GetName());
+	UE_LOG(LogRPG_Ability, Log, TEXT("[%s] GAS 初始化完成（Owner=%s，运行在%s）"),
+		*GetName(), *PS->GetName(), HasAuthority() ? TEXT("服务器") : TEXT("客户端"));
+
+	// ══════════════════════════════════════════════════════════════════
+	//  以下只在服务器执行 —— 客户端靠复制拿到同样的状态
+	// ══════════════════════════════════════════════════════════════════
+	// 为什么客户端不做这两件事：
+	//
+	//   · 授予能力：GiveAbility 产生的 FGameplayAbilitySpec 会由 ASC 自动复制到客户端。
+	//     客户端自己也调一次的话，会和复制过来那份重复，产生两个同能力实例——
+	//     症状是"放一次技能触发两遍效果"，而且**只在联机时出现**，极难查。
+	//
+	//   · 初始属性：GE 的修改结果会通过属性集复制同步过来，客户端不需要自己算一遍。
+	//
+	// 这是 GAS 联机的基本原则：**状态由服务器产生，客户端只消费复制结果**。
+	// 客户端唯一要自己做的事是"预测"，那由 GA 的 NetExecutionPolicy 负责，
+	// 不需要在这里重复授予能力。
+	//
+	// 注意 InitAbilityActorInfo 是**两边都要做**的（已经在上面执行）：
+	// 客户端也需要知道自己的 Owner 是哪个 PlayerState、Avatar 是哪个角色，
+	// 否则本地预测和 GameplayCue 的定位都会出错。
+	if (!HasAuthority())
+	{
+		bAbilitySystemInitialized = true;
+		return;
+	}
 
 	// ══════════════════════════════════════════════════════════════════
 	//  应用初始属性

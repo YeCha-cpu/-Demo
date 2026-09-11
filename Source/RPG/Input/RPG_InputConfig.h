@@ -63,7 +63,7 @@ class RPG_API URPG_InputConfig : public UPrimaryDataAsset
 	GENERATED_BODY()
 
 public:
-	/** 默认的输入映射上下文。PlayerController 在 BeginPlay 时把它加进 EnhancedInput 子系统 */
+	/** 默认的输入映射上下文（IMC）。PlayerController 在 BeginPlay 时把它加进 EnhancedInput 子系统 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RPG|Input")
 	TObjectPtr<UInputMappingContext> DefaultMappingContext = nullptr;
 
@@ -71,7 +71,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RPG|Input")
 	int32 MappingContextPriority = 0;
 
-	// ── 直接驱动移动的输入（不走 GAS）──
+	// ── 直接驱动移动的输入（IA） 不走 GAS ──
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RPG|Input|Locomotion")
 	TObjectPtr<UInputAction> MoveAction = nullptr;
@@ -82,7 +82,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RPG|Input|Locomotion")
 	TObjectPtr<UInputAction> CrouchAction = nullptr;
 
-	// ── 走 GAS 的能力输入 ──
+	// ── 走 GAS 的能力输入，输入动作 → 输入标签"映射 ──
 
 	/** 攻击、闪避、跳跃、奔跑、法术等，全部通过输入标签进入 GAS */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RPG|Input|Abilities", meta = (TitleProperty = "Description"))

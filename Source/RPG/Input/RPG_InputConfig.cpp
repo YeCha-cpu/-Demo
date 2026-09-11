@@ -6,10 +6,7 @@
 
 bool URPG_InputConfig::FindInputTagForAction(const UInputAction* Action, FGameplayTag& OutTag) const
 {
-	if (!Action)
-	{
-		return false;
-	}
+	if (!Action) return false;
 
 	for (const FRPG_InputActionMapping& Mapping : AbilityInputMappings)
 	{
@@ -27,10 +24,7 @@ bool URPG_InputConfig::FindInputTagForAction(const UInputAction* Action, FGamepl
 
 UInputAction* URPG_InputConfig::FindActionForInputTag(FGameplayTag InputTag) const
 {
-	if (!InputTag.IsValid())
-	{
-		return nullptr;
-	}
+	if (!InputTag.IsValid()) return nullptr;
 
 	for (const FRPG_InputActionMapping& Mapping : AbilityInputMappings)
 	{

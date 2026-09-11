@@ -19,10 +19,7 @@
 
 URPG_AttributeSet* URPG_AbilitySystemLibrary::GetRPGAttributeSet(const AActor* Actor)
 {
-	if (!Actor)
-	{
-		return nullptr;
-	}
+	if (!Actor) return nullptr;
 
 	// 引擎已有 GetSetOnActor<T>()，它内部走 IAbilitySystemInterface，
 	// 因此"ASC 在 PlayerState 上"（玩家）和"ASC 在自身"（敌人）都能正确解析。
@@ -33,15 +30,11 @@ URPG_AttributeSet* URPG_AbilitySystemLibrary::GetRPGAttributeSet(const AActor* A
 
 bool URPG_AbilitySystemLibrary::IsAlive(const AActor* Actor)
 {
-	if (!Actor)
-	{
-		return false;
-	}
+	if (!Actor) return false;
 
 	// 优先走 RPG 接口 —— 实现者可能重写了更严格的判定
 	// （比如"无敌帧中"不算可攻击状态，但仍算存活）
-	if (const IRPG_AbilitySystemInterface* RPGInterface =
-			Cast<IRPG_AbilitySystemInterface>(const_cast<AActor*>(Actor)))
+	if (const IRPG_AbilitySystemInterface* RPGInterface = Cast<IRPG_AbilitySystemInterface>(const_cast<AActor*>(Actor)))
 	{
 		return RPGInterface->IsAlive();
 	}
@@ -52,26 +45,18 @@ bool URPG_AbilitySystemLibrary::IsAlive(const AActor* Actor)
 
 bool URPG_AbilitySystemLibrary::HasGameplayTag(const AActor* Actor, FGameplayTag Tag)
 {
-	if (!Actor || !Tag.IsValid())
-	{
-		return false;
-	}
+	if (!Actor || !Tag.IsValid()) return false;
 
-	const UAbilitySystemComponent* ASC =
-		UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(const_cast<AActor*>(Actor));
+	const UAbilitySystemComponent* ASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(const_cast<AActor*>(Actor));
 
 	return ASC && ASC->HasMatchingGameplayTag(Tag);
 }
 
 float URPG_AbilitySystemLibrary::GetAttributeValue(const AActor* Actor, FGameplayAttribute Attribute)
 {
-	if (!Attribute.IsValid())
-	{
-		return 0.f;
-	}
+	if (!Attribute.IsValid()) return 0.f;
 
-	const UAbilitySystemComponent* ASC =
-		UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(const_cast<AActor*>(Actor));
+	const UAbilitySystemComponent* ASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(const_cast<AActor*>(Actor));
 
 	return ASC ? ASC->GetNumericAttribute(Attribute) : 0.f;
 }

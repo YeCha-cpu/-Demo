@@ -128,10 +128,7 @@ void ARPG_BaseCharacter::Move(const FInputActionValue& Value)
 {
 	const FVector2D MovementVector = Value.Get<FVector2D>();
 
-	if (!Controller || MovementVector.IsNearlyZero())
-	{
-		return;
-	}
+	if (!Controller || MovementVector.IsNearlyZero()) return;
 
 	// 用**控制器的** Yaw 而不是角色自身的 Yaw 作为参考系。
 	// 这样"按 W"永远是"朝屏幕前方走"，而不是"朝角色面朝方向走"——
@@ -150,10 +147,7 @@ void ARPG_BaseCharacter::Look(const FInputActionValue& Value)
 {
 	const FVector2D LookAxisVector = Value.Get<FVector2D>();
 
-	if (!Controller)
-	{
-		return;
-	}
+	if (!Controller) return;
 
 	AddControllerYawInput(LookAxisVector.X);
 	AddControllerPitchInput(LookAxisVector.Y);
@@ -179,12 +173,6 @@ void ARPG_BaseCharacter::StopSprint()
 
 void ARPG_BaseCharacter::ToggleCrouch()
 {
-	if (bIsCrouched)
-	{
-		UnCrouch();
-	}
-	else
-	{
-		Crouch();
-	}
+	if (bIsCrouched) UnCrouch();
+	else  Crouch();
 }

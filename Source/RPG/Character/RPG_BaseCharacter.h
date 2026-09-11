@@ -98,7 +98,7 @@ protected:
 	// ══════════════════════════════════════════════════════════════════
 
 	/**
-	 * 返回本角色的 ASC。
+	 * 返回本角色的 ASC 的虚函数。
 	 *   玩家：return PlayerState->GetAbilitySystemComponent()
 	 *   敌人：return 自己的 AbilitySystemComponent
 	 * 允许返回 nullptr（ASC 尚未初始化时）。

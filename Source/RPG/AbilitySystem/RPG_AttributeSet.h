@@ -34,15 +34,22 @@
  * 加 Duration GE → 只影响 CurrentValue，到期自动还原（比如加攻 Buff）
  *
  * ══════════════════════════════════════════════════════════════════════
- * 【关于网络复制】
+ * 【网络复制：为什么属性集是 GAS 里最繁琐的部分】
  * ══════════════════════════════════════════════════════════════════════
- * 本项目不做联机，因此**没有**实现 GetLifetimeReplicatedProps / OnRep_* 函数。
- * 如果将来要加联机，每个属性需要：
- *   1. UPROPERTY(ReplicatedUsing = OnRep_Health) FGameplayAttributeData Health;
- *   2. 实现 void OnRep_Health(const FGameplayAttributeData& OldValue)
- *      { GAMEPLAYATTRIBUTE_REPNOTIFY(URPG_AttributeSet, Health, OldValue); }
- *   3. GetLifetimeReplicatedProps 里 DOREPLIFETIME_CONDITION_NOTIFY(...)
- * 属性集是 GAS 里复制规则最繁琐的部分，这也是"一开始就把 ASC 挂对位置"的价值所在。
+ * 每个需要同步的属性都要"三件套"：
+ *   1. UPROPERTY(ReplicatedUsing = OnRep_Xxx)          —— 声明这个属性要同步
+ *   2. void OnRep_Xxx(const FGameplayAttributeData& Old) —— 客户端收到新值时的处理
+ *   3. GetLifetimeReplicatedProps 里 DOREPLIFETIME_CONDITION_NOTIFY(...) —— 注册复制规则
+ *
+ * 三件套里最容易漏的是第 2 步。漏了它，服务器改属性后客户端**数值会同步，
+ * 但不会触发任何回调**——UI 不刷新、依赖属性变化的逻辑不执行，表现为
+ * "血条不动但实际血量已经变了"，是联机调试里最隐蔽的一类 bug。
+ *
+ * 这也正是"一开始就把 ASC 挂对位置"的价值：属性集挂在 PlayerState 上，
+ * 复制路径天然正确，不需要额外处理重生时的属性同步。
+ *
+ * 注意 IncomingDamage（元属性）**不参与复制**：它只是服务器上伤害计算的
+ * 临时投递口，用完立即清零，同步它没有意义、还浪费带宽。
  */
 UCLASS()
 class RPG_API URPG_AttributeSet : public UAttributeSet
@@ -55,17 +62,18 @@ public:
 	//~ Begin UAttributeSet interface
 	virtual void PreAttributeChange(const FGameplayAttribute& Attribute, float& NewValue) override;
 	virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData& Data) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	//~ End UAttributeSet interface
 
 	// ══════════════════════════════════════════════════════════════════
 	//  生命
 	// ══════════════════════════════════════════════════════════════════
 
-	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Health")
+	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Health", ReplicatedUsing = OnRep_Health)
 	FGameplayAttributeData Health;
 	ATTRIBUTE_ACCESSORS_BASIC(URPG_AttributeSet, Health);
 
-	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Health")
+	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Health", ReplicatedUsing = OnRep_MaxHealth)
 	FGameplayAttributeData MaxHealth;
 	ATTRIBUTE_ACCESSORS_BASIC(URPG_AttributeSet, MaxHealth);
 
@@ -74,12 +82,12 @@ public:
 	// ══════════════════════════════════════════════════════════════════
 
 	/** 攻击力。伤害计算的基础值：BaseDamage = Attack × 攻击段倍率 */
-	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Combat")
+	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Combat", ReplicatedUsing = OnRep_Attack)
 	FGameplayAttributeData Attack;
 	ATTRIBUTE_ACCESSORS_BASIC(URPG_AttributeSet, Attack);
 
 	/** 防御值。参与减伤公式 Mitigation = Defense / (Defense + K)，K 默认 100 */
-	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Combat")
+	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Combat", ReplicatedUsing = OnRep_Defense)
 	FGameplayAttributeData Defense;
 	ATTRIBUTE_ACCESSORS_BASIC(URPG_AttributeSet, Defense);
 
@@ -87,11 +95,11 @@ public:
 	//  法力（黑神话式的 3 个法术消耗）
 	// ══════════════════════════════════════════════════════════════════
 
-	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Mana")
+	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Mana", ReplicatedUsing = OnRep_Mana)
 	FGameplayAttributeData Mana;
 	ATTRIBUTE_ACCESSORS_BASIC(URPG_AttributeSet, Mana);
 
-	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Mana")
+	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Mana", ReplicatedUsing = OnRep_MaxMana)
 	FGameplayAttributeData MaxMana;
 	ATTRIBUTE_ACCESSORS_BASIC(URPG_AttributeSet, MaxMana);
 
@@ -100,13 +108,29 @@ public:
 	//  闪避/攻击/跳跃分次消耗，奔跑/蓄力持续消耗，停手 3 秒后缓慢恢复
 	// ══════════════════════════════════════════════════════════════════
 
-	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Stamina")
+	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Stamina", ReplicatedUsing = OnRep_Stamina)
 	FGameplayAttributeData Stamina;
 	ATTRIBUTE_ACCESSORS_BASIC(URPG_AttributeSet, Stamina);
 
-	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Stamina")
+	UPROPERTY(BlueprintReadOnly, Category = "RPG|Attributes|Stamina", ReplicatedUsing = OnRep_MaxStamina)
 	FGameplayAttributeData MaxStamina;
 	ATTRIBUTE_ACCESSORS_BASIC(URPG_AttributeSet, MaxStamina);
+
+	// ── 网络复制回调 ──
+	// 只在客户端被调用（服务器是数据源，不会回调自己）。
+	// GAMEPLAYATTRIBUTE_REPNOTIFY 宏内部做两件事：
+	//   1. SetBaseAttributeValueFromReplication —— 把同步过来的值写进本地属性
+	//   2. 广播 OnGameplayAttributeValueChange 委托
+	// 所以 UI 只要注册了那个委托就会自动刷新，不需要手写任何同步逻辑。
+	// 这也是为什么"漏掉 OnRep"的症状是数值对了但界面不动。
+	UFUNCTION() virtual void OnRep_Health(const FGameplayAttributeData& OldHealth);
+	UFUNCTION() virtual void OnRep_MaxHealth(const FGameplayAttributeData& OldMaxHealth);
+	UFUNCTION() virtual void OnRep_Attack(const FGameplayAttributeData& OldAttack);
+	UFUNCTION() virtual void OnRep_Defense(const FGameplayAttributeData& OldDefense);
+	UFUNCTION() virtual void OnRep_Mana(const FGameplayAttributeData& OldMana);
+	UFUNCTION() virtual void OnRep_MaxMana(const FGameplayAttributeData& OldMaxMana);
+	UFUNCTION() virtual void OnRep_Stamina(const FGameplayAttributeData& OldStamina);
+	UFUNCTION() virtual void OnRep_MaxStamina(const FGameplayAttributeData& OldMaxStamina);
 
 	// ══════════════════════════════════════════════════════════════════
 	//  元属性（Meta Attribute）

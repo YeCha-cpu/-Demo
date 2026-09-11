@@ -72,7 +72,18 @@ void ARPG_Enemy::InitializeAbilitySystem()
 	// 对比玩家：Owner = PlayerState、Avatar = 角色 —— 这正是不对称之处。
 	AbilitySystemComponent->InitAbilityActorInfo(this, this);
 
-	UE_LOG(LogRPG_Ability, Log, TEXT("[%s] GAS 初始化完成（Owner 与 Avatar 均为自身）"), *GetName());
+	UE_LOG(LogRPG_Ability, Log, TEXT("[%s] GAS 初始化完成（Owner 与 Avatar 均为自身，运行在%s）"),
+		*GetName(), HasAuthority() ? TEXT("服务器") : TEXT("客户端"));
+
+	// ── 以下只在服务器执行 ──
+	// 敌人由 AI 驱动，所有状态都在服务器产生、再复制给各客户端。
+	// 客户端上的敌人实例只需要正确的 ActorInfo（供动画和 GameplayCue 定位），
+	// 不需要自己授予能力或应用初始属性 —— 理由与玩家一致，详见 RPG_Player.cpp。
+	if (!HasAuthority())
+	{
+		bAbilitySystemInitialized = true;
+		return;
+	}
 
 	// ── 初始属性（先属性后能力，理由同玩家）──
 	if (InitAttributesEffect)

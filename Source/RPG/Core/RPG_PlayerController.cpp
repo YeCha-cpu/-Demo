@@ -7,6 +7,8 @@
 #include "EnhancedInputSubsystems.h"
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
+#include "InputAction.h"
+#include "InputActionValue.h"
 #include "InputMappingContext.h"
 
 #include "AbilitySystem/RPG_AbilitySystemComponent.h"
@@ -18,15 +20,45 @@
 
 ARPG_PlayerController::ARPG_PlayerController()
 {
-	// 阶段 1 不需要每帧处理输入——增强输入是事件驱动的。
-	// 将来若要做"按住攻击键持续蓄力"这类需要累积时间的逻辑，
-	// 可以在 GA 里用 AbilityTask 处理，仍然不需要 PC 的 Tick。
-	PrimaryActorTick.bCanEverTick = false;
+	// ⚠️⚠️ 绝对不要在这里写 PrimaryActorTick.bCanEverTick = false; ⚠️⚠️
+	//
+	// 我踩过这个坑：当时的理由是"增强输入是事件驱动的，不需要每帧处理"。
+	// 这个判断是**错的**。增强输入的 Triggered / Started / Completed 事件，
+	// 恰恰是在每帧的输入处理里评估 InputMappingContext 的 Trigger 才产生的：
+	//
+	//     APlayerController::TickActor()     ← 由 PrimaryActorTick 驱动
+	//       └─ TickPlayerInput()
+	//            └─ UPlayerInput::Tick()      ← 在这里评估所有 IMC 的 Trigger
+	//                 └─ 产生 Triggered / Started / Completed 事件
+	//
+	// 把 bCanEverTick 设为 false，等于掐断整条输入管线。症状是
+	// **所有按键都没反应，而且不报任何错**——极难查。
+	//
+	// AController 的构造函数里把它设成 true（Controller.cpp:62）正是为了让
+	// 这条链路能跑起来，子类保持默认即可，不要动它。
+	//
+	// （将来做"按住攻击键蓄力"这类需要累积时间的逻辑时，用 GA 里的
+	//   AbilityTask 处理；即使那样，PlayerController 的 Tick 也不能关。）
 }
 
 void ARPG_PlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// ══════════════════════════════════════════════════════════════════
+	//  联机适配：只有"本机控制"的 PlayerController 才处理输入
+	// ══════════════════════════════════════════════════════════════════
+	// 联机下，服务器上会存在代表**远程玩家**的 PlayerController。它们没有
+	// LocalPlayer（GetLocalPlayer() 返回 nullptr），在上面绑定输入、添加 IMC
+	// 没有任何意义。
+	//
+	// 单机（Standalone）下 IsLocalController() 恒为 true，这个判断等于不存在，
+	// 所以它**不会**影响单人 PIE 的迭代速度 —— 这是"保留单机自动降级"的体现。
+	if (!IsLocalController())
+	{
+		UE_LOG(LogRPG, Verbose, TEXT("[%s] 不是本机控制器（远程玩家），跳过输入初始化"), *GetName());
+		return;
+	}
 
 	if (!InputConfig)
 	{
@@ -46,17 +78,33 @@ void ARPG_PlayerController::BeginPlay()
 
 	// 把输入映射上下文注册到增强输入子系统。
 	// MappingContext 才是真正决定"哪个键触发哪个 InputAction"的地方 ——
-	// InputConfig 只负责"哪个 InputAction 对应哪个输入标签"。
+	// InputConfig 只负责"哪个 InputAction 对应哪个输入标签（起映射作用）"。
 	if (const ULocalPlayer* LP = GetLocalPlayer())
 	{
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
-				LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
 		{
 			Subsystem->AddMappingContext(InputConfig->DefaultMappingContext, InputConfig->MappingContextPriority);
 
 			UE_LOG(LogRPG, Log, TEXT("[%s] 已添加输入映射上下文：%s（优先级 %d）"),
 				*GetName(), *InputConfig->DefaultMappingContext->GetName(), InputConfig->MappingContextPriority);
 		}
+	}
+
+	// ── 诊断：IMC 里到底配了几条按键映射 ──
+	// ⚠️ "IMC 添加成功" 不等于 "IMC 里有内容"。一个空的 IMC 照样能添加成功，
+	// 但按什么键都不会有反应。少了这个检查，这两种情况的日志长得一模一样。
+	const int32 MappingCount = InputConfig->DefaultMappingContext->GetMappings().Num();
+	if (MappingCount == 0)
+	{
+		UE_LOG(LogRPG, Error,
+			TEXT("[%s] IMC「%s」里一条按键映射都没有！"
+			     "请打开这个 IMC 资产，在 Mappings 数组里添加 W/A/S/D 等映射"),
+			*GetName(), *InputConfig->DefaultMappingContext->GetName());
+	}
+	else
+	{
+		UE_LOG(LogRPG, Log, TEXT("[%s] IMC「%s」中共有 %d 条按键映射"),
+			*GetName(), *InputConfig->DefaultMappingContext->GetName(), MappingCount);
 	}
 }
 
@@ -88,16 +136,47 @@ void ARPG_PlayerController::SetupInputComponent()
 	// ══════════════════════════════════════════════════════════════════
 	//  移动类输入 —— 直接驱动角色，不经过 GAS
 	// ══════════════════════════════════════════════════════════════════
+	// 每个分支都打印结果。之前这里是静默的，导致"InputConfig 里没填 Move Action"
+	// 和"IMC 里没配按键"这两种完全不同的故障，在日志上完全分辨不出来。
 	if (InputConfig->MoveAction)
 	{
 		EIC->BindAction(InputConfig->MoveAction, ETriggerEvent::Triggered, this,
 			&ARPG_PlayerController::OnMove);
+		UE_LOG(LogRPG, Log, TEXT("  ├─ Move    → %s"), *InputConfig->MoveAction->GetName());
+
+		// 移动的 Value Type 必须是 Axis2D。如果配成 Digital 或 Axis1D，
+		// Value.Get<FVector2D>() 会静默返回零向量——按了键，代码也收到了事件，
+		// 但移动向量是 (0,0)，表现为"按键没反应"。
+		if (InputConfig->MoveAction->ValueType != EInputActionValueType::Axis2D)
+		{
+			UE_LOG(LogRPG, Error,
+				TEXT("  │   ⚠ IA_RPG_Move 的 Value Type 应该是 Axis2D (Vector2D)，当前不是 —— "
+				     "移动向量会永远是零，角色不会动"));
+		}
+	}
+	else
+	{
+		UE_LOG(LogRPG, Error,
+			TEXT("  ├─ Move    ✗ 未绑定！DA_RPG_InputConfig 的 Locomotion 分类下 "
+			     "Move Action 是空的 —— WASD 不会有任何反应"));
 	}
 
 	if (InputConfig->LookAction)
 	{
 		EIC->BindAction(InputConfig->LookAction, ETriggerEvent::Triggered, this,
 			&ARPG_PlayerController::OnLook);
+		UE_LOG(LogRPG, Log, TEXT("  ├─ Look    → %s"), *InputConfig->LookAction->GetName());
+
+		if (InputConfig->LookAction->ValueType != EInputActionValueType::Axis2D)
+		{
+			UE_LOG(LogRPG, Error,
+				TEXT("  │   ⚠ IA_RPG_Look 的 Value Type 应该是 Axis2D (Vector2D)，当前不是"));
+		}
+	}
+	else
+	{
+		UE_LOG(LogRPG, Error,
+			TEXT("  ├─ Look    ✗ 未绑定！InputConfig 里 Look Action 是空的 —— 鼠标转不了视角"));
 	}
 
 	if (InputConfig->CrouchAction)
@@ -106,6 +185,11 @@ void ARPG_PlayerController::SetupInputComponent()
 		// Triggered 每帧都会触发，会导致蹲下立刻又站起来，反复横跳。
 		EIC->BindAction(InputConfig->CrouchAction, ETriggerEvent::Started, this,
 			&ARPG_PlayerController::OnCrouch);
+		UE_LOG(LogRPG, Log, TEXT("  ├─ Crouch  → %s"), *InputConfig->CrouchAction->GetName());
+	}
+	else
+	{
+		UE_LOG(LogRPG, Warning, TEXT("  ├─ Crouch  ✗ 未绑定（InputConfig 里 Crouch Action 为空）"));
 	}
 
 	// 奔跑是"按住"型：Started 开始、Completed 结束。
@@ -129,12 +213,10 @@ void ARPG_PlayerController::SetupInputComponent()
 
 	for (const FRPG_InputActionMapping& Mapping : InputConfig->AbilityInputMappings)
 	{
-		// 跳过没配全的条目 —— 编辑资产时必然经过"填了一半"的状态，
+		// 跳过没配全的条目 —— 编辑资产时必然有"填了一半"的状态，
 		// 这里静默跳过；真正的配置错误会在输入失效时暴露出来。
 		if (!Mapping.InputAction || !Mapping.InputTag.IsValid())
-		{
 			continue;
-		}
 
 		EIC->BindAction(Mapping.InputAction, ETriggerEvent::Started, this,
 			&ARPG_PlayerController::OnAbilityInputPressed, Mapping.InputTag);

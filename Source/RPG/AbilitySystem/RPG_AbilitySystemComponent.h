@@ -52,16 +52,16 @@ public:
 	URPG_AbilitySystemComponent();
 
 	/**
-	 * 注册一个输入标签对应的能力，并立即授予。
+	 * 注册一个输入标签对应的GA，并立即授予。
 	 *
-	 * @param InputTag     输入标签，形如 Input.Attack.Light
+	 * @param InputTag     输入标签，如 Input.Attack.Light
 	 * @param AbilityClass 要授予的能力类
 	 * @param Level        能力等级（影响 GE 的 Level 与 SetByCaller 缩放）
 	 * @return 是否注册成功
 	 */
 	bool RegisterInputAbility(FGameplayTag InputTag, TSubclassOf<UGameplayAbility> AbilityClass, int32 Level = 1);
 
-	/** 批量注册（角色初始化时调用一次） */
+	/** 批量注册GA（角色初始化时调用一次） */
 	void RegisterInputAbilities(const TMap<FGameplayTag, TSubclassOf<UGameplayAbility>>& InMappings);
 
 	/**
@@ -81,13 +81,13 @@ public:
 
 protected:
 	/**
-	 * 输入标签 → 能力类。只用于注册阶段，运行期激活走下面的 Handle 表。
+	 * 输入标签 → 能力类 的映射表。只用于注册阶段，运行期激活走下面的 Handle 表。
 	 */
 	UPROPERTY()
 	TMap<FGameplayTag, TSubclassOf<UGameplayAbility>> InputTagToAbilityClass;
 
 	/**
-	 * 输入标签 → 已授予能力的 SpecHandle。
+	 * 输入标签 → 已授予能力的 SpecHandle 的映射表。
 	 * 注册后立即填充，是运行期查找的唯一依据。
 	 */
 	TMap<FGameplayTag, FGameplayAbilitySpecHandle> InputTagToSpecHandle;

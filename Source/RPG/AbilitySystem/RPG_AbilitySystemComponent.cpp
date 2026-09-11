@@ -8,11 +8,23 @@
 
 URPG_AbilitySystemComponent::URPG_AbilitySystemComponent()
 {
-	// 本项目不做联机，这个设置在当前没有实际效果。
-	// 保留它是为了表达设计意图并给将来留好接口：
-	//   Mixed = 玩家自己控制的角色走 Full（客户端需要完整信息做预测），
-	//           其他角色走 Minimal（只同步 GameplayCue 与标签，省带宽）。
-	// 单机下写不写都一样，但写出来能让读代码的人知道 ASC 是按联机标准设计的。
+	// ── 开启复制 ──
+	// 少这一句，联机下整个 GAS 等于失效：
+	//   · 能力激活不会同步到服务器（客户端放技能，服务器不知道）
+	//   · GE 不会复制到其他客户端（别人看不到你身上的 Buff）
+	//   · GameplayCue 不会在其他客户端播放（特效只有自己看得见）
+	// 而且这三件事都不会报错，只是"没反应"。
+	SetIsReplicated(true);
+
+	// ── 复制模式 ──
+	// Mixed = 自己控制的角色走 Full，其他角色走 Minimal：
+	//   Full    —— 客户端拿到完整的 GE 信息，这样才能做本地预测
+	//   Minimal —— 只同步 GameplayCue 与标签，省带宽
+	//             （别人身上的 Buff 具体是几层、还剩几秒，我不需要知道）
+	// 这是玩家类 ASC 的标准配置。
+	//
+	// 敌人（AI 控制）在 Mixed 下走 Minimal，对 MVP 够用。
+	// 若将来要让客户端对敌人做预测（比如"附身"机制），再单独调成 Full。
 	SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
 }
 
@@ -47,6 +59,7 @@ bool URPG_AbilitySystemComponent::RegisterInputAbility(
 		InputTagToSpecHandle.Remove(InputTag);
 	}
 
+	// “2步走”创建并授予 GA 实例
 	// Level 会传给 GA，进而影响它施加的 GE 的 Level——
 	// 这是 GAS 里做"技能等级影响数值"的机制，现在固定 1 级，架构先留好。
 	const FGameplayAbilitySpec NewSpec(AbilityClass, Level);
@@ -54,22 +67,20 @@ bool URPG_AbilitySystemComponent::RegisterInputAbility(
 
 	if (!Handle.IsValid())
 	{
-		UE_LOG(LogRPG_Ability, Error, TEXT("RegisterInputAbility 失败：授予能力 %s 未成功"),
-			*AbilityClass->GetName());
+		UE_LOG(LogRPG_Ability, Error, TEXT("RegisterInputAbility 失败：授予能力 %s 未成功"), *AbilityClass->GetName());
 		return false;
 	}
 
+	// 存储两个映射关系表，方便后续通过输入标签快速找到对应的 GA 类与 Handle
 	InputTagToAbilityClass.Add(InputTag, AbilityClass);
 	InputTagToSpecHandle.Add(InputTag, Handle);
 
-	UE_LOG(LogRPG_Ability, Log, TEXT("注册输入能力：%s → %s"),
-		*InputTag.ToString(), *AbilityClass->GetName());
+	UE_LOG(LogRPG_Ability, Log, TEXT("注册输入能力：%s → %s"), *InputTag.ToString(), *AbilityClass->GetName());
 
 	return true;
 }
 
-void URPG_AbilitySystemComponent::RegisterInputAbilities(
-	const TMap<FGameplayTag, TSubclassOf<UGameplayAbility>>& InMappings)
+void URPG_AbilitySystemComponent::RegisterInputAbilities(const TMap<FGameplayTag, TSubclassOf<UGameplayAbility>>& InMappings)
 {
 	for (const TPair<FGameplayTag, TSubclassOf<UGameplayAbility>>& Pair : InMappings)
 	{
