@@ -60,7 +60,44 @@ public:
 	URPG_AttributeSet();
 
 	//~ Begin UAttributeSet interface
+	/**
+	 * 钳制**当前值**。
+	 *
+	 * ⚠️ 它只在**直接赋值**路径上被调用（`SetStamina()` 这类），
+	 * GE 的 Modifier **不经过这里** —— 详见下面那个。
+	 */
 	virtual void PreAttributeChange(const FGameplayAttribute& Attribute, float& NewValue) override;
+
+	/**
+	 * 钳制**基础值**（BaseValue）。
+	 *
+	 * ══════════════════════════════════════════════════════════════════
+	 * 【★ 这个才是 GE 修改必经的那道关】
+	 * ══════════════════════════════════════════════════════════════════
+	 * 只重写 PreAttributeChange 是**拦不住 GE 的**。
+	 *
+	 * 引擎里这两条路是分开的：
+	 *   · 直接赋值      → SetNumericValueChecked → PreAttributeChange
+	 *   · GE 的 Modifier → SetAttributeBaseValue → **PreAttributeBaseChange**
+	 *
+	 * 整个 GAS 插件里 `PreAttributeChange` 只有两处调用点，都在
+	 * AttributeSet.cpp 的属性拷贝函数里；而 GE 施加 Modifier 走的是
+	 * GameplayEffect.cpp:4001 的这条。引擎自己的注释也写明了这一点：
+	 *
+	 *   "This function should enforce clamping (presuming you wish to clamp
+	 *    the base value **along with** the final value in PreAttributeChange)"
+	 *                                          —— AttributeSet.h:226-228
+	 *
+	 * 漏写的后果：**耐力/生命可以突破 [0, Max]**。
+	 *   · 耐力耗尽后继续攻击 → BaseValue 变成负数 → 界面读数长时间停在 0
+	 *     （恢复要先把负数填平），表现为"很久都不恢复"
+	 *   · 耐力恢复是每 0.25 秒 +3.75 且没有上限 → 站着不动两分钟 BaseValue
+	 *     能涨到几百，之后消耗 8 点根本看不出来，表现为"满耐力时消耗还是 100%"
+	 *
+	 * 而且这两个症状**都不会报错**，只会让人觉得"数值怪怪的"。
+	 */
+	virtual void PreAttributeBaseChange(const FGameplayAttribute& Attribute, float& NewValue) const override;
+
 	virtual void PostGameplayEffectExecute(const FGameplayEffectModCallbackData& Data) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	//~ End UAttributeSet interface
@@ -161,4 +198,14 @@ public:
 
 	/** 单次伤害的保底值，避免高防目标完全免伤导致打不动 */
 	static constexpr float MinDamage = 1.f;
+
+private:
+	/**
+	 * 属性钳制规则 —— 上面两个 Pre* 回调共用同一套。
+	 *
+	 * 抽出来是为了保证"直接赋值"和"GE 修改"两条路径的行为**绝对一致**，
+	 * 不会出现"用 SetStamina() 会被钳制、用 GE 就不会"这种诡异差异 ——
+	 * 那种差异查起来极其痛苦，因为两条路看起来都"应该"是同一个结果。
+	 */
+	void ClampAttribute(const FGameplayAttribute& Attribute, float& NewValue) const;
 };

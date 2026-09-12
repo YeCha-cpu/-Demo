@@ -185,7 +185,7 @@
 
 **然后给角色配上骨骼网格体**（否则你看不到人物，只有一个空胶囊）：
 - 选中 `Mesh` 组件 → `Skeletal Mesh` = `SKM_Manny`（在 `Content/Characters/Mannequins/Meshes/`）
-- `Anim Class` 先留空（阶段 5 才做动画蓝图）
+- `Anim Class` 先留空（阶段 4 才做动画蓝图）
 
 ### 5.2 `BP_RPG_PlayerController`
 **位置**：`Content/RPG/Character/Player/`
@@ -226,7 +226,7 @@ File → New Level → 选 **Basic**（或 Empty Level），保存为 `L_RPG_Tes
 |---|---|---|
 | `Player Start` | 地面上方 | 玩家出生点，**必须有**，否则会从 0,0,0 掉落 |
 | `Floor` / 任意静态网格体 | 铺一块地面 | 用 `Content/LevelPrototyping` 里的白盒方块，或直接拖一个 Cube 拉大 |
-| `Nav Mesh Bounds Volume` | 覆盖地面 | **阶段 4 的 AI 要用**，现在放着不影响 |
+| `Nav Mesh Bounds Volume` | 覆盖地面 | **阶段 5 的 AI 要用**，现在放着不影响 |
 | `BP_RPG_Enemy`（可选） | 地面上 | 用来看属性集是否生效 |
 
 **最后一步**：World Settings → `GameMode Override` = `BP_RPG_GameModeBase`
@@ -310,7 +310,7 @@ AbilitySystem.Debug.NextTarget
 |---|---|
 | 客户端的 `LogRPG_Ability` 只显示"运行在客户端"，没有"已应用初始属性" | 设计如此——初始属性由服务器产生，客户端等复制 |
 | 两边数值短暂不一致 | 复制有延迟，正常 |
-| 客户端上敌人不动（如果你放了敌人） | 阶段 4 的 AI 才会加 `HasAuthority()` 守卫 |
+| 客户端上敌人不动（如果你放了敌人） | 阶段 5 的 AI 才会加 `HasAuthority()` 守卫 |
 
 ---
 

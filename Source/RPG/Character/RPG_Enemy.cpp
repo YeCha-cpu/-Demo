@@ -18,7 +18,7 @@ ARPG_Enemy::ARPG_Enemy()
 	// 原因是构造函数可能对 CDO 执行多次，而 AddSpawnedAttribute 会改动内部数组；
 	// 放到初始化函数里能保证"每个实例只登记一次"。
 
-	// 阶段 4 会在这里补上：
+	// 阶段 5 会在这里补上：
 	//     AIControllerClass = ARPG_AIController::StaticClass();
 	//     AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 	// 现在先不设，避免依赖尚不存在的 AI 类。

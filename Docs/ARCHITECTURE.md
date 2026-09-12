@@ -46,7 +46,7 @@
 | 层 | 内容 | 状态 |
 |---|---|---|
 | **L1 基础复制** | 属性集 `ReplicatedUsing` + `OnRep_*`、ASC 复制开关、服务器/客户端权威分支 | ✅ 阶段 1 已实现 |
-| **L2 权威与预测** | GA 的 `NetExecutionPolicy`、伤害服务器权威判定、蒙太奇与 GameplayCue 全端同步 | 阶段 2 实现 |
+| **L2 权威与预测** | GA 的 `NetExecutionPolicy`、伤害服务器权威判定、蒙太奇与 GameplayCue 全端同步 | ✅ 阶段 2 已实现 |
 | **L3 进阶** | 延迟补偿、位置回滚、专用服务器、网络平滑调参 | ❌ 不做 |
 
 - **主模式：Listen Server** —— PIE 里设 `Number of Players = 2` + `Net Mode = Play As Listen Server` 即可测试，不需要额外打包 Dedicated Server
@@ -999,21 +999,21 @@ ABP_RPG_Base (父类: URPG_AnimInstanceBase)
 │
 └── AnimGraph
     │
-    ├── [SM_Main]  ← Main 状态机（汇总层）
+    ├── [SM_Main]  ← 唯一的顶层状态机
     │      │
-    │      ├── State: Grounded
-    │      │     └── Sub-Graph / Linked Anim Graph → SM_Locomotion_Walk
+    │      ├── State: Grounded   (State Type = Blend graph)
+    │      │     └── 独立动画图：BS_RPG_IdleWalk
     │      │
-    │      ├── State: Running
-    │      │     └── Sub-Graph / Linked Anim Graph → SM_Locomotion_Run
+    │      ├── State: Sprinting  (State Type = Blend graph)
+    │      │     └── 独立动画图：BS_RPG_WalkSprint
     │      │
-    │      ├── State: InAir
-    │      │     └── Sub-Graph / Linked Anim Graph → SM_Locomotion_Jump
+    │      ├── State: InAir      (State Type = Blend graph)
+    │      │     └── 独立动画图：BS_RPG_Jump
     │      │
-    │      ├── State: Crouching
-    │      │     └── Sub-Graph / Linked Anim Graph → SM_Locomotion_Crouch
+    │      ├── State: Crouching  (State Type = Blend graph)
+    │      │     └── 独立动画图：BS_RPG_Crouch
     │      │
-    │      └── (过渡)  ← 状态切换基于 URPG_AnimInstanceBase 暴露的布尔量
+    │      └── (转移规则) ← 全部基于 URPG_AnimInstanceBase 的 MovementState 枚举
     │
     ├── [Slot 'DefaultSlot']        ← 蒙太奇插槽（战斗动作从这里覆盖）
     │
@@ -1022,93 +1022,125 @@ ABP_RPG_Base (父类: URPG_AnimInstanceBase)
     └── ──→ Output Pose
 ```
 
-**四个子状态机**：
+> ⚠️ **修正记录（2026-09-12）**：本节最初写的是"`SM_Main` 的状态里嵌套四条子状态机"。
+> 查证引擎源码后确认**这在 UE 里做不到**：
+>   · 状态机图的右键菜单只有 `Add State` / `Add State Alias` / `Add Conduit` /
+>     `Add Entry Point` / `Add Comment` —— 没有"子状态机"（`AnimationStateMachineSchema.cpp:377-418`）
+>   · 状态节点的类型枚举只有 `Single animation` 和 `Blend graph` 两个值（`AnimStateNode.h:16-20`）
+>
+> 改用**一个状态机 + 四个 `Blend graph` 状态**。每个 `Blend graph` 状态拥有
+> **自己独立的动画图**，同样实现了"四段逻辑分开保存"的目标，
+> 而且额外拿到了真正的状态转移规则、混合时间和 `Always Reset on Entry`。
+>
+> 另一条路是 Anim Layer Interface（Lyra 的做法），留到"多个角色共用同一套动画"时再上。
 
-| 状态机 | 输入变量 | 内部状态 |
+**四个状态的内部构成**：
+
+| 状态 | 输入变量 | 内部内容 |
 |---|---|---|
-| `SM_Locomotion_Walk` | `Speed`, `Direction`, `bIsCrouching` | Idle ↔ Walk ↔ Jog（BlendSpace 混合） |
-| `SM_Locomotion_Run` | `Speed`, `Direction` | Jog ↔ Sprint |
-| `SM_Locomotion_Jump` | `bIsInAir`, `VerticalVelocity`, `bIsFalling` | JumpStart → Fall Loop → Land |
-| `SM_Locomotion_Crouch` | `Speed`, `Direction` | CrouchIdle ↔ CrouchWalk |
+| `Grounded` | `SpeedRatio`, `Direction` | `BS_RPG_IdleWalk`（1D 混合空间） |
+| `Sprinting` | `SpeedRatio`, `Direction` | `BS_RPG_WalkSprint` |
+| `InAir` | `VerticalVelocity` | `BS_RPG_Jump`，勾 `Always Reset on Entry` |
+| `Crouching` | `SpeedRatio`, `Direction` | `BS_RPG_Crouch` |
 
-**为什么用"子状态机"而不是"一个状态机里堆所有状态"？**
+**为什么拆成四个状态，而不是一个状态机里堆所有状态？**
 - 可维护性：走路的状态转移逻辑（Idle→Walk→Jog→Stop）和跳跃的逻辑（起跳→滞空→落地）完全不同，混在一起转移线数量是乘积级增长
-- 复用性：`SM_Locomotion_Walk` 可以直接搬到其他角色上
-- 调试：每个子状态机的调试视图独立，不用在几十条转移线里找一条
+- 每个状态的动画图独立，改跳跃不会碰到走路
+- 调试：`MovementState` 是枚举，转移条件写 `== Grounded` 即可，
+  不用拼 `bIsInAir && !bIsCrouching && ...` 那种容易写漏的布尔组合
+
+详细的搭建步骤见 [`PHASE4_ANIMATION_SETUP.md`](./PHASE4_ANIMATION_SETUP.md)。
 
 ### 8.2 C++ 侧 AnimInstance 基类
 
+**已实现，见 `Source/RPG/Animation/RPG_AnimInstanceBase.h/.cpp`。** 暴露给蓝图的量：
+
 ```cpp
 UCLASS()
-class URPG_AnimInstanceBase : public UAnimInstance
+class RPG_API URPG_AnimInstanceBase : public UAnimInstance
 {
     GENERATED_BODY()
 public:
     virtual void NativeInitializeAnimation() override;
     virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 
+    ARPG_BaseCharacter* GetRPGCharacter() const;
+    FString GetAnimationDebugString() const;      // 排查用的一行状态摘要
+
 protected:
-    // ── 暴露给蓝图的状态量（只读）──
-    UPROPERTY(BlueprintReadOnly, Transient, Category="RPG|Locomotion")
-    float Speed = 0.f;
+    // ── 移动（喂给状态机与混合空间）──
+    float Speed;              // 水平速度，已剔除垂直分量
+    float MaxSpeed;           // 当前姿态的最大速度（随冲刺 / 蹲伏变）
+    float SpeedRatio;         // ★ Speed / MaxSpeed，0~1 —— 混合空间横轴用这个
+    float Direction;          // 0 = 前，+90 = 右，-90 = 左，±180 = 后
+    float VerticalVelocity;
+    bool  bIsInAir;
+    bool  bIsCrouching;
+    ERPG_MovementState MovementState;   // ★ SM_Main 的切换依据
 
-    UPROPERTY(BlueprintReadOnly, Transient, Category="RPG|Locomotion")
-    float Direction = 0.f;
-
-    UPROPERTY(BlueprintReadOnly, Transient, Category="RPG|Locomotion")
-    bool bIsInAir = false;
-
-    UPROPERTY(BlueprintReadOnly, Transient, Category="RPG|Locomotion")
-    bool bIsCrouching = false;
-
-    // ── 从 ASC 标签读取的战斗状态 ──
-    UPROPERTY(BlueprintReadOnly, Transient, Category="RPG|Combat")
-    bool bIsAttacking = false;
-
-    UPROPERTY(BlueprintReadOnly, Transient, Category="RPG|Combat")
-    bool bIsDodging = false;
-
-    UPROPERTY(BlueprintReadOnly, Transient, Category="RPG|Combat")
-    bool bIsSprinting = false;
-
-    // ── 攻击模组类型（决定用哪套蒙太奇）──
-    UPROPERTY(BlueprintReadOnly, Transient, Category="RPG|Combat")
-    ERPG_AttackModuleType CurrentModuleType = ERPG_AttackModuleType::Unarmed;
+    // ── 战斗（全部来自 GameplayTag）──
+    bool  bIsAttacking;       // State.Attacking
+    bool  bIsDodging;         // State.Dodging
+    bool  bIsSprinting;       // State.Sprinting
+    bool  bIsCharging;        // State.Attack.Charging
+    int32 ChargeLevel;        // State.Attack.Charging.Lv1/2/3
+    bool  bIsInvulnerable;    // State.Invulnerable
+    bool  bIsDead;            // State.Dead
+    ERPG_AttackModuleType AttackModuleType;   // 来自 CombatComponent
+    int32 ComboIndex;                          // 来自 CombatComponent
 
 private:
     TWeakObjectPtr<ARPG_BaseCharacter> OwnerCharacter;
-    TWeakObjectPtr<UAbilitySystemComponent> CachedASC;
 
-    void UpdateLocomotion(float DeltaSeconds);
-    void UpdateCombatState();     // 查 ASC 标签
-};
+    void UpdateCombatState();   // 先跑：算出标签状态
+    void UpdateLocomotion();    // 后跑：判 MovementState 时要读 bIsSprinting
 ```
 
-> 💡 用 `Transient` 是因为这些是每帧算出来的缓存值，不需要序列化。用 `TWeakObjectPtr` 持有 ASC 避免 GC 引用环。这些都是 UE 里容易踩的坑。
+> 💡 用 `Transient` 是因为这些是每帧算出来的缓存值，不需要序列化。
+> 用 `TWeakObjectPtr` 持有角色避免 GC 引用环。这些都是 UE 里容易踩的坑。
 
 **为什么 AnimInstance 直接查 ASC 而不是靠 GA 推变量？**
 GA 推变量需要维护"什么时候推、什么时候复位"的同步逻辑，一旦 GA 被中断就容易残留脏状态。AnimInstance 每帧从标签读（`ASC->HasMatchingGameplayTag`），**标签是唯一真相源（Single Source of Truth）**，天然不会不同步。
 
+**为什么混合空间横轴用 `SpeedRatio` 而不是 `Speed`？**
+`MaxSpeed` 会随状态变（走 300 / 冲刺 850 / 蹲 180）。用绝对速度做横轴，就需要为每种姿态各做一个混合空间，而且改一次数值就要重做一遍动画。用 0~1 的比率则一个混合空间三种速度通用。
+
+**为什么 ASC 每帧重新取，不缓存？**
+玩家的 ASC 挂在 PlayerState 上，而 PlayerState 会随重生 / 关卡切换 / 联机重连被整个替换。缓存的话必须自己处理失效时机，漏一个就是"复活后动画再也不对了"。代价只是一次 Cast，换掉一整类时序 bug 是划算的。
+
+**为什么 `UpdateCombatState` 必须跑在 `UpdateLocomotion` 前面？**
+`UpdateLocomotion` 判定 `MovementState` 时要读 `bIsSprinting`。顺序反了的话冲刺状态永远慢一帧 —— 表现为"起步瞬间播的是跑步动画"。
+
 ### 8.3 AnimNotify 清单
 
-| 类 | 类型 | 时机 | 广播的 Event |
+**已实现**（`Source/RPG/Animation/Notifies/`）：
+
+| 类 | 编辑器里显示为 | 类型 | 广播的 Event |
 |---|---|---|---|
-| `RPG_AnimNotify_AttackWindow` | NotifyState | 伤害判定窗口 | `Event.Combat.AttackWindow.Open` / `.Close` |
-| `RPG_AnimNotify_ComboWindow` | NotifyState | 连段衔接窗口 | `Event.Combat.ComboWindow.Open` / `.Close` |
-| `RPG_AnimNotify_Invulnerability` | NotifyState | 无敌帧 | `Event.Character.Invulnerability.Begin` / `.End` |
-| `RPG_AnimNotify_ConsumeStamina` | Notify | 动画某一帧扣耐力 | `Event.Character.StaminaCost` |
-| `RPG_AnimNotify_AttackEnd` | Notify | 动作结束 | `Event.Combat.AttackEnd` |
-| `RPG_AnimNotify_SendGameplayEvent` | Notify | 通用 | 编辑器内任意配置 |
+| `URPG_AnimNotifyState_AttackWindow` | `RPG 攻击判定窗口` | NotifyState | `Event.Combat.AttackWindow.Open` / `.Close` |
+| `URPG_AnimNotifyState_ComboWindow` | `RPG 连段衔接窗口` | NotifyState | `Event.Combat.ComboWindow.Open` / `.Close` |
+| `URPG_AnimNotifyState_Invulnerability` | `RPG 无敌帧` | NotifyState | `Event.Character.Invulnerability.Begin` / `.End` |
+| `URPG_AnimNotify_AttackEnd` | `RPG 攻击结束` | Notify | `Event.Combat.AttackEnd` |
+
+**规划中未实现**：
+
+| 类 | 类型 | 时机 | 为什么暂时不做 |
+|---|---|---|---|
+| `RPG_AnimNotify_ConsumeStamina` | Notify | 动画某一帧扣耐力 | 目前耐力消耗跟着"段的开始"走（见 `GA_LightAttack::StartSegment`）。改成动画驱动更精确，但会让"没有动画时无法验证数值"，留到打击感调优阶段 |
+| `RPG_AnimNotify_SendGameplayEvent` | Notify | 通用 | 现有 4 个已覆盖全部需求，通用版属于"以后可能要"。真需要时再加，避免留下没人用的类 |
 
 **Notify 上的可配置参数**（这是"单次攻击信息"的来源）：
 
 ```cpp
-UCLASS(meta=(DisplayName="RPG Attack Window"))
-class URPG_AnimNotify_AttackWindow : public UAnimNotifyState
+UCLASS(meta = (DisplayName = "RPG 攻击判定窗口"))
+class URPG_AnimNotifyState_AttackWindow : public UAnimNotifyState
 {
     // 这些参数在蒙太奇编辑器里逐帧配置
-    UPROPERTY(EditAnywhere, Category="Attack")
-    FGameplayTag AttackTag;                     // 哪一段攻击
+    UPROPERTY(EditAnywhere, Category="RPG|Attack")
+    FGameplayTag AttackTag;                     // 哪一段攻击（仅用于日志区分）
+
+    UPROPERTY(EditAnywhere, Category="RPG|Attack")
+    bool bOverrideTrace = false;                // 是否覆盖攻击模组里的检测配置
 
     UPROPERTY(EditAnywhere, Category="Attack")
     ERPG_TraceSource TraceSource;               // 检测源类型
@@ -1134,6 +1166,19 @@ class URPG_AnimNotify_AttackWindow : public UAnimNotifyState
 | `UpperBody` | 上半身动作（施法、射击、喝药）——后续扩展 |
 
 蒙太奇资产的 `Slot` 设置必须与 ABP 中的 `Slot` 节点名一致，否则动画不播（这是新手最常见的坑，我会在实施文档里标注检查点）。
+
+**★ 混合时间：新建蒙太奇的隐藏陷阱**
+
+`UAnimMontage` 构造函数把 `Blend In` / `Blend Out` 各默认设成 **0.25 秒**（`AnimMontage.cpp:76-77`）。
+对一段 0.6 秒的攻击动画来说，前 0.25 秒在从移动姿势淡入、后 0.25 秒在淡出，
+真正打满的只有中间 0.1 秒 —— 表现是"按了攻击键，人物只是微微动了一下"。
+
+**攻击类蒙太奇必须手工调整**：`Blend In` 0.05~0.1，`Blend Out` 0.1~0.15。
+闪避可以留长一点（0.1~0.15），翻滚需要惯性感。
+
+`URPG_GameplayAbilityBase::PlayMontageOrSkip()` 里有一条自动体检：
+`淡入 + 淡出 > 动画全长的 50%` 时打 Warning，直接点名是哪个蒙太奇。
+放在那里是因为它是所有蒙太奇的必经之路 —— 轻击 / 重击 / 切手技 / 闪避全覆盖。
 
 ---
 
@@ -1443,50 +1488,95 @@ Content/RPG/
 - [x] **代码验收：编译通过**
 
 > 📌 **与原计划的偏差**（都是主动简化的）：
-> - `RPG_AIController` 挪到阶段 4 —— 阶段 1 没有 AI 需求，不建空类
+> - `RPG_AIController` 挪到阶段 5 —— 阶段 1 没有 AI 需求，不建空类
 > - 调试手段用**控制台命令**（`RPGPrintAttributes` / `RPGPrintTags`）而不是绑定按键 ——
 >   不需要任何输入资产就能用，也不占用输入映射
 > - `GE_InitAttributes` 与各类蓝图需要**你在编辑器里创建**，
 >   详细步骤见 [`Docs/PHASE1_EDITOR_SETUP.md`](./PHASE1_EDITOR_SETUP.md)
 > - ⏳ **待你验收**：编辑器资产建好、PIE 里能跑能跳、控制台能打出属性
 
-### 阶段 2 · 战斗核心（预计 2~3 天）
+### 阶段 2 · 战斗核心 —— ✅ 代码已完成（2026-09-12）
 
-- [ ] `RPG_AttackModuleData` + 3 个 DA 资产（先填占位蒙太奇）
-- [ ] `RPG_InputBuffer` + `RPG_CombatComponent`（缓存容器 + 连段状态机）
-- [ ] `RPG_GA_LightAttack`（5 段连段 + 衔接窗口）
-- [ ] `RPG_GA_HeavyAttack`（3 段蓄力 + 切手技）
-- [ ] `RPG_AbilityTask_WeaponTrace`（三种检测源）
-- [ ] AnimNotify 全家桶（AttackWindow / ComboWindow / AttackEnd）
-- [ ] `RPG_DamageExecution` + `GE_Damage` + `GCN_HitImpact`
-- [ ] `RPG_GA_Dodge`（冲量 + 无敌帧）
-- [ ] **L2 联机**：GA 的 `NetExecutionPolicy`（攻击/闪避用 `LocalPredicted`，敌人 AI 用 `ServerOnly`）
-      + `NetSecurityPolicy`；伤害判定放服务器；GameplayCue 走 GE 复制而非手动 `SpawnActor`
-- [ ] **✅ 验收：5 段连击可打出、蓄力重击生效、翻滚有无敌帧、命中掉血有特效；
-      PIE 双客户端下属性同步正确、伤害由服务器权威判定**
+- [x] `RPG_AttackModuleData` + 攻击模组 DA 资产
+- [x] `RPG_InputBuffer` + `RPG_CombatComponent`（LIFO 缓存容器 + 连段状态机）
+- [x] `RPG_GA_LightAttack`（5 段连段 + 衔接窗口）
+- [x] `RPG_GA_HeavyAttack`（3 段蓄力 + 切手技，一个 GA 两种形态）
+- [x] `RPG_AbilityTask_WeaponTrace`（连续 Sweep 防隧穿、同次挥砍内目标去重）
+- [x] AnimNotify 全家桶（AttackWindow / ComboWindow / AttackEnd / Invulnerability）
+- [x] `RPG_DamageExecution` + `GE_Damage`（防御减伤曲线 + 元属性中转）
+- [x] `RPG_GA_Dodge`（`LaunchCharacter` 冲量 + 无敌帧）
+- [x] **L2 联机**：GA 基类默认 `LocalPredicted` + `ClientOrServer`；
+      伤害与 Buff 类能力用 `ServerOnly` 避免两端各算一次
+- [x] **代码验收：编译通过**
+- ⏳ **待验收**：配置步骤见 [`PHASE2_COMBAT_SETUP.md`](./PHASE2_COMBAT_SETUP.md)
 
-### 阶段 3 · 资源系统（预计 0.5~1 天）
+### 阶段 3 · 资源系统 —— ✅ 代码已完成（2026-09-12）
 
-- [ ] `GE_StaminaCost` / `GE_StaminaDrain` / `GE_StaminaRegenDelay` / `GE_StaminaRegen`
-- [ ] `GA_StaminaRegen`（被动，标签阻断式）
-- [ ] `GA_Sprint` / `GA_Jump`（耐力接入）
-- [ ] `GE_Heal` / `GE_Buff_AttackUp` / `GE_Debuff_DefenseDown` + `GA_Heal` / `GA_ApplyBuff`
-- [ ] **✅ 验收：耐力消耗符合规则表；停手 3 秒后开始缓慢恢复；加攻 Buff 后伤害确实变高**
+- [x] `GE_StaminaCost` / `GE_StaminaRegenDelay` / `GE_StaminaRegen`
+- [x] `GA_StaminaRegen`（被动，标签阻断式 —— 零计时代码实现"停手 3 秒后恢复"）
+- [x] `GA_Sprint` / `GA_Jump`（耐力接入，替换掉过渡期的原生绑定）
+- [x] `GA_Heal` / `GA_ApplyBuff`
+- [x] 被动能力通道（`GivePassiveAbility` + `StartupPassiveAbilities` + `bActivateOnGranted`）
+- [x] **代码验收：编译通过**
+- ⏳ **待验收**：配置步骤见 [`PHASE3_RESOURCE_SETUP.md`](./PHASE3_RESOURCE_SETUP.md)
 
-### 阶段 4 · 敌人 AI（预计 1~1.5 天）
+### 阶段 4 · 动画蓝图 —— ✅ 已完成（2026-09-12）
+
+> 📌 **为什么从原阶段 5 提前到阶段 4**
+>
+> 在动画接上之前，所有攻击都走 GA 里的"模拟时序"分支（用定时器代替
+> AnimNotify 事件）——数值链路能验证，但**战斗手感根本无从评估**：
+> 前后摇多长、衔接窗口多宽、判定窗口开在哪一帧，这些都要看真实动画才能调。
+>
+> 而且轻击 / 切手技 / 重击三者之间的衔接问题，也需要真实动画才能稳定复现。
+> 动画是"把已有代码变成能演示的战斗"的最后一环，所以它比 AI 更紧急。
+
+- [x] `URPG_AnimInstanceBase`（从 CharacterMovement 与 ASC 标签读取状态）
+- [x] `ERPG_MovementState` 移动状态枚举（`Animation/RPG_AnimationTypes.h`）
+- [x] `ABP_RPG_Base` + `SM_Main` + 4 个 `Blend graph` 状态 + `DefaultSlot`
+- [x] `ABP_RPG_Player` / `ABP_RPG_Enemy` 子类
+- [x] 蒙太奇资产制作 + Slot / Notify 配置
+- [x] 搭建指南：[`PHASE4_ANIMATION_SETUP.md`](./PHASE4_ANIMATION_SETUP.md)
+- [x] 蒙太奇指南：[`PHASE4_MONTAGE_SETUP.md`](./PHASE4_MONTAGE_SETUP.md)
+- [x] **验收：走跑跳蹲动画正常切换；5 段轻击可打全；重击 / 切手技 / 闪避动画正常**
+
+> 🐞 **本阶段修掉的四个静默 bug**（全都不报错，只能靠日志和源码查证）
+>
+> | bug | 症状 | 根因 |
+> |---|---|---|
+> | 多段蒙太奇的旧任务没拆干净 | 连段打不全、动作只播开头 | `EndTask()` 拦不住回调（守卫判断的是能力是否激活）→ 必须 `RemoveDynamic` |
+> | `State.*` 标签从没被授予过 | 动画永远读到"不在攻击" | 声明了但没人在运行期挂上去 |
+> | 属性钳制漏了 `PreAttributeBaseChange` | 耐力长时间停在 0 / 消耗了还是满的 | GE 的 Modifier 不走 `PreAttributeChange` |
+> | 切手技永远走蓄力分支 | 按右键打不出切手技 | `CancelAbilitiesWithTag` 在 `PreActivate` 里先执行，判断依据被自己取消掉了 |
+>
+> 细节见附录 B.6。
+
+> 🐞 **顺带修的 bug：`State.*` 标签从来没有人授予过**
+>
+> 写 AnimInstance 时发现：`State.Attacking` / `State.Dodging` / `State.Attack.Charging.*`
+> 这几个标签在 `RPG_GameplayTags.h` 里声明了，**但全工程没有一处代码在运行期挂上它们**。
+> 之前的 GA 只挂 `Ability.Attack.Light` 这类"能力身份"标签。
+>
+> 后果：动画蓝图按设计文档去查 `State.Attacking`，会永远拿到 false ——
+> 而且不报错，只是"攻击时角色还在跑"。典型的静默失败。
+>
+> 修法：
+>   · `GA_LightAttack` / `GA_HeavyAttack` 的 `ActivationOwnedTags` 加 `State.Attacking`
+>   · `GA_Dodge` 加 `State.Dodging`
+>   · `GA_HeavyAttack` 用 `UpdateChargeTags()` / `ClearChargeTags()` 手动增删蓄力标签
+>     （蓄力只覆盖激活期的一部分时间，`ActivationOwnedTags` 表达不了）
+>
+> 同时厘清了 `Ability.*` 与 `State.*` 的分工：前者是能力身份（给 GAS 内部用），
+> 后者是角色状态（给动画 / AI / UI 查）。两者生命周期**碰巧**一样，
+> 但混用会在加新能力时出问题。
+
+### 阶段 5 · 敌人 AI（预计 1~1.5 天）
 
 - [ ] `BB_RPG_Enemy` 黑板资产 + `BT_RPG_Enemy` 行为树资产
 - [ ] `BTService_RPG_PerceptionUpdate` / `BTTask_RPG_Patrol` / `BTTask_RPG_MoveToTarget` / `BTTask_RPG_Attack` / `BTDecorator_RPG_CanAttack`
 - [ ] `ARPG_AIController` 感知配置
 - [ ] 敌人的攻击模组 DA
 - [ ] **✅ 验收：敌人巡逻 → 发现玩家 → 追击 → 进入范围攻击 → 丢失目标后返回巡逻**
-
-### 阶段 5 · 动画蓝图（预计 1~1.5 天）
-
-- [ ] `ABP_RPG_Base` 骨架 + 4 个子状态机 + `Main` 汇总 + `DefaultSlot`
-- [ ] `ABP_RPG_Player` / `ABP_RPG_Enemy` 子类
-- [ ] 蒙太奇资产的 Slot 与 Notify 配置
-- [ ] **✅ 验收：走跑跳蹲动画正常切换；攻击蒙太奇正确覆盖；翻滚动画完整播放**
 
 ### 阶段 6 · 打磨与扩展（持续）
 
@@ -1582,7 +1672,7 @@ UI 不刷新、依赖属性变化的逻辑不执行。表现是"血条不动但�
 **元属性 `IncomingDamage` 有意不复制**：它只是服务器上伤害计算的临时投递口，
 用完立即清零，同步它没有意义、还浪费带宽。
 
-### 14.3 GA 的预测策略（阶段 2 实现）
+### 14.3 GA 的预测策略（阶段 2 已实现）
 
 `UGameplayAbility::NetExecutionPolicy` 的四个取值：
 
@@ -1600,6 +1690,22 @@ UI 不刷新、依赖属性变化的逻辑不执行。表现是"血条不动但�
 配套的 `NetSecurityPolicy` 决定"谁有权请求激活"：
 - `ClientOrServer` —— 允许客户端主动请求（攻击、闪避）
 - `ServerOnly` —— 拒绝客户端请求，防伪造（敌人 AI 的能力）
+
+> ⚠️ **已知缺口：切手技的分支判断是"每台机器各判一次"**
+>
+> `GA_HeavyAttack` 靠"激活瞬间查不查得到 `Ability.Attack.Light`"来决定走切手技
+> 还是蓄力分支。这个查询在客户端和服务器上**各自独立发生**，而服务器的能力
+> 激活最多晚一个 RTT —— 那时它本地那份轻击可能已经播完并结束了。
+>
+> 结果：两端可能选中**不同分支**（一边播切手蒙太奇、另一边进入蓄力），
+> 且没有任何纠正机制。伤害和动画会不一致。
+>
+> 这不是新引入的问题（原来的声明式取消同样永远产生蓄力分支），
+> 但在单机测试里**完全看不出来**。
+>
+> 正确做法是让服务器仲裁这个分支，然后把结果复制下来
+> （例如用一个 `Replicated` 的分支标记，或把分支决定做成一次带预测键的
+> `Server RPC`）。属于 L2 范畴内的补课，需要单独立项。
 
 ### 14.4 伤害的权威判定
 
@@ -1777,6 +1883,86 @@ TSubclassOf<UGameplayEffect> CooldownGameplayEffectClass;
 
 冷却 GE 本身 = Duration GE + `UTargetTagsGameplayEffectComponent` 授予 `Cooldown.*` 标签。
 之后用 `ASC->GetCooldownRemainingForTag(Tag, TimeRemaining, Duration)` 查询。
+
+### B.6 执行顺序与生命周期陷阱 ★ 本阶段踩过的
+
+> 这一节里的每一条都**不报错**，只会让行为"莫名其妙"。它们的共同点是：
+> 你以为在 A 时刻能读到的东西，其实在更早的 B 时刻就已经被清掉了。
+
+**① `CancelAbilitiesWithTag` 在 `PreActivate` 里执行，早于 `ActivateAbility`**
+
+```cpp
+// GameplayAbility.cpp:1020
+CallActivateAbility()
+  ├─ PreActivate()                          // :1022
+  │    └─ ApplyAbilityBlockAndCancelTags()  // :999  ← 在这里取消其他能力
+  │         └─ CancelAbilities → 被取消能力的 EndAbility
+  │              └─ 摘掉它的 ActivationOwnedTags
+  └─ ActivateAbility()                      // :1023  ← 轮到这里标签已经没了
+```
+
+**推论**：「先靠 `CancelAbilitiesWithTag` 取消 A，再在 `ActivateAbility` 里查 A 的标签判断分支」
+这个写法是**错的** —— 判断依据会被自己取消掉。
+本项目 `GA_HeavyAttack` 的切手技分支就踩了这个坑（永远走蓄力分支）。
+修法：不用声明式取消，改成在 `ActivateAbility` 开头先读标签、读完再手动
+`ASC->CancelAbilities(&Tags, nullptr, this)`。
+
+**② `EndTask()` 拦不住旧的 AbilityTask 回调**
+
+```cpp
+// AbilityTask.cpp:199
+bool UAbilityTask::ShouldBroadcastAbilityTaskDelegates() const
+{
+    bool ShouldBroadcast = (Ability && Ability->IsActive());  // 判断的是"能力"，不是"任务"
+```
+
+任务结束了但能力还激活着（比如连段进行中），旧任务的 `OnCompleted` / `OnInterrupted`
+**照样会广播**。必须 `RemoveDynamic` 摘掉自己注册的回调。
+
+本项目 `GA_LightAttack` 因此踩坑：连段接下一段时，上一段的蒙太奇任务还活着，
+它播完时广播 `OnCompleted` → 把正在播第 N+1 段的这次能力判定为"整套打完了"
+→ 症状是连招永远打不全，而且日志里看不出异常。
+
+**③ 属性钳制要写两个回调，只写一个必然漏**
+
+| 修改途径 | 走的回调 | 出处 |
+|---|---|---|
+| 代码直接赋值 `SetStamina()` | `PreAttributeChange` | `AttributeSet.cpp:82/95` |
+| **GE 的 Modifier（含 SetByCaller、周期效果）** | **`PreAttributeBaseChange`** | `GameplayEffect.cpp:4001` |
+
+只重写 `PreAttributeChange` 的话，GE 修改**完全不受约束** —— 耐力能掉成负数、
+也能被无限恢复推过上限。修法是两个回调共用一个 `ClampAttribute()`。
+
+**④ 蒙太奇的混合时间默认值对短动画是灾难**
+
+`UAnimMontage` 构造时 `BlendIn` / `BlendOut` 各 0.25 秒（`AnimMontage.cpp:76-77`），
+而淡出触发点是 `全长 - BlendOutTriggerTime`（默认取 `BlendOut.BlendTime`，
+`AnimMontage.cpp:2628-2636`）。于是 `淡入 + 淡出 > 全长` 时**淡入还没走完就开始淡出**，
+混合权重永远到不了 1 —— 动作变成"半吊子模糊版"。
+
+攻击蒙太奇应该手工设成 `Blend In 0.05` / `Blend Out 0.1`，
+必要时再把 `Blend Out Trigger Time` 设成非负值推迟淡出。
+
+**⑤ 播新蒙太奇会停掉同 Group 的旧蒙太奇**
+
+`Montage_PlayInternal` 的 `bStopAllMontages` 默认 `true`，会执行
+`StopAllMontagesByGroupName`（`AnimInstance.cpp:2758-2772`）——
+"同一个 Group 同时只允许一个蒙太奇"。旧蒙太奇会以 `bInterrupted = true` 被停掉。
+
+**⑥ 命名冲突两个**
+
+| 名字 | 已被占用 | 后果 |
+|---|---|---|
+| `CurrentMontage` | `UGameplayAbility` 自带该成员 | 子类声明会 UHT 报 shadowing |
+| `Character` | `AController` 自带该成员 | 局部变量重名报 C4458 |
+
+**⑦ 状态机不能嵌套**
+
+状态机图的右键菜单只有 `Add State` / `Add State Alias` / `Add Conduit` /
+`Add Entry Point` / `Add Comment`（`AnimationStateMachineSchema.cpp:377-418`），
+状态节点类型只有 `Single animation` 和 `Blend graph`（`AnimStateNode.h:16-20`）。
+"四个子状态机被 Main 汇总"要用「一个状态机 + 四个 `Blend graph` 状态」实现 ——
+每个 `Blend graph` 状态拥有自己独立的动画图。
 
 ---
 

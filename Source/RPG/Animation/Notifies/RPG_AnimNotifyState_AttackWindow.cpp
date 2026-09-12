@@ -45,6 +45,8 @@ void URPG_AnimNotifyState_AttackWindow::NotifyBegin(
 	EventData.Instigator = Owner;
 	EventData.Target = Owner;
 	EventData.OptionalObject = Payload;
+	// 来源蒙太奇，供 GA 识别"迟到事件"（理由同 ComboWindow）
+	EventData.OptionalObject2 = Animation;
 
 	UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
 		Owner, RPGTags::Event_Combat_AttackWindow_Open, EventData);
@@ -77,6 +79,11 @@ void URPG_AnimNotifyState_AttackWindow::NotifyEnd(
 	FGameplayEventData EventData;
 	EventData.EventTag = RPGTags::Event_Combat_AttackWindow_Close;
 	EventData.Instigator = Owner;
+	// ★ 来源蒙太奇：蒙太奇被停掉时引擎会补发 NotifyEnd，
+	// 上一段的"判定窗口关闭"会在下一段刚播起来时到达。
+	// GA 靠这个字段判断它是不是当前这一段发的，不是就忽略，
+	// 否则会把下一段刚开起来的轨迹检测任务直接掐掉。
+	EventData.OptionalObject2 = Animation;
 
 	UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
 		Owner, RPGTags::Event_Combat_AttackWindow_Close, EventData);

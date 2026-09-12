@@ -31,6 +31,7 @@ void URPG_AnimNotifyState_ComboWindow::NotifyBegin(
 	FGameplayEventData EventData;
 	EventData.EventTag = RPGTags::Event_Combat_ComboWindow_Open;
 	EventData.Instigator = Owner;
+	EventData.OptionalObject2 = Animation;   // 来源蒙太奇，见下方说明
 
 	UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
 		Owner, RPGTags::Event_Combat_ComboWindow_Open, EventData);
@@ -60,6 +61,24 @@ void URPG_AnimNotifyState_ComboWindow::NotifyEnd(
 	FGameplayEventData EventData;
 	EventData.EventTag = RPGTags::Event_Combat_ComboWindow_Close;
 	EventData.Instigator = Owner;
+
+	// ★ 把来源蒙太奇带上 —— 这是"迟到事件"能被识别出来的唯一依据。
+	//
+	// 引擎在**蒙太奇被停掉时，会主动给所有还活着的 NotifyState 补发 NotifyEnd**
+	// （UAnimInstance::TriggerMontageEndedEvent，AnimInstance.cpp:2507，
+	//  注释就写着 "Send end notifications for anim notify state when we are stopped"）。
+	//
+	// 而连段接下一段的做法正是"停掉上一段的蒙太奇"，所以：
+	//   第 N 段衔接窗口打开 → 接上第 N+1 段 → 第 N 段的蒙太奇被停
+	//     → 引擎补发第 N 段的「衔接窗口关闭」→ 一帧后到达 GA
+	//     → 如果 GA 不辨来源，会拿它当成"当前这一段的窗口关闭"
+	//     → 顺手把缓存里的下一次按键吃掉，凭空多跳一段
+	//
+	// 表现是"连招打不全/跳段"，而且只在快速连打时出现。
+	// 带上来源之后，GA 侧一比就知道这条是上一段的，直接忽略。
+	//
+	// 用 OptionalObject2 而不是 OptionalObject：后者留给攻击判定窗口传载荷用。
+	EventData.OptionalObject2 = Animation;
 
 	UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
 		Owner, RPGTags::Event_Combat_ComboWindow_Close, EventData);

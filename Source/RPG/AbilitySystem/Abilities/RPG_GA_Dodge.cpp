@@ -18,6 +18,23 @@
 URPG_GA_Dodge::URPG_GA_Dodge()
 {
 	SetAssetTags(FGameplayTagContainer(RPGTags::Ability_Dodge));
+
+	// ══════════════════════════════════════════════════════════════════
+	//  挂上状态标签 State.Dodging
+	// ══════════════════════════════════════════════════════════════════
+	// 动画蓝图据此判断要不要播翻滚动作，AI 据此判断"这货正在躲，先别砍"。
+	//
+	// 用 ActivationOwnedTags 而不是自己 AddLooseGameplayTag 有一个关键好处：
+	// 它的**生命周期由 GAS 托管** —— 能力结束、被打断、被取消，
+	// 标签都会被自动摘掉。手写 Add/Remove 的话，一旦有某条路径忘了 Remove
+	// （比如能力被 CancelAbilitiesWithTag 强行取消），
+	// 角色就会永久停在"闪避中"，而且这种 bug 只在特定时序下出现。
+	//
+	// 复制行为：ActivationOwnedTags 走 EGameplayTagReplicationState::CountToOwner，
+	// 意味着**标签本身会复制给所有客户端**（模拟代理也看得到），
+	// 只有计数只发给拥有者。对 HasMatchingGameplayTag 这种布尔查询没有影响。
+	// 前提是工程设置 GameplayAbilities → ReplicateActivationOwnedTags 保持默认的开。
+	ActivationOwnedTags.AddTag(RPGTags::State_Dodging);
 }
 
 bool URPG_GA_Dodge::CanActivateAbility(

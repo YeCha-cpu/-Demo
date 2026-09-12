@@ -8,6 +8,7 @@
 
 class UAbilityTask_PlayMontageAndWait;
 class URPG_AbilityTask_WeaponTrace;
+class UAnimMontage;
 
 /**
  * 轻击（5 段连段）。
@@ -149,6 +150,20 @@ private:
 	/** 衔接窗口是否开启中 */
 	bool bComboWindowOpen = false;
 
+	// ══════════════════════════════════════════════════════════════════
+	//  段时长诊断
+	// ══════════════════════════════════════════════════════════════════
+	// "这一段的动画太短"是一种主观感受，但背后的原因只有两种，处理方式完全相反：
+	//   · 实际播放时长 ≈ 动画全长 → 动画本身就短，该换更长的动画资产
+	//   · 实际播放时长 ≪ 动画全长 → 被下一段接走了，该把衔接窗口往后挪
+	// 光靠眼睛分不出来，所以在这里记住上一段的起点和全长，下一段开始时打出来。
+
+	/** 上一段蒙太奇开始时的世界时间 */
+	float PreviousSegmentStartTime = 0.f;
+
+	/** 上一段蒙太奇的全长（秒）。0 表示上一段没有蒙太奇 */
+	float PreviousSegmentMontageLength = 0.f;
+
 	/** 本次挥砍的轨迹检测任务 */
 	UPROPERTY()
 	TObjectPtr<URPG_AbilityTask_WeaponTrace> TraceTask;
@@ -156,4 +171,63 @@ private:
 	/** 模拟时序用的定时器 */
 	FTimerHandle SimulatedSegmentTimer;
 	FTimerHandle SimulatedComboTimer;
+
+	// ══════════════════════════════════════════════════════════════════
+	//  当前段的蒙太奇任务 ★（连段正确性的关键）
+	// ══════════════════════════════════════════════════════════════════
+	// 连段每接一段，都会留下上一段的蒙太奇和它的 PlayMontageAndWait 任务
+	// 继续活着。不清掉的话，上一段动画播完时会广播 OnCompleted，
+	// 把**正在播下一段**的这次能力判定为"整套打完了"。
+	//
+	// 症状：连招永远打不全（每次接下一段都会给上一段埋一颗炸在它自己
+	// 动画结束时刻的雷），而且日志里看不出异常。
+	//
+	// 详见 StopCurrentSegmentMontage() 里的完整说明。
+
+	/** 当前这一段的蒙太奇任务 */
+	UPROPERTY()
+	TObjectPtr<UAbilityTask_PlayMontageAndWait> CurrentSegmentMontageTask;
+
+	/** 当前这一段的蒙太奇。切段时要停掉它，防止它的 Notify 迟到触发 */
+	UPROPERTY()
+	TObjectPtr<UAnimMontage> CurrentSegmentMontage;
+
+	/**
+	 * 摘掉注册在任务上的回调并结束任务。**不停蒙太奇本身**。
+	 *
+	 * 用在连段收尾：那时我们希望最后一段的动画自然播完，
+	 * 但又不想让它的回调在能力已经结束后再触发一次。
+	 */
+	void DetachCurrentSegmentMontageTask();
+
+	/**
+	 * 切段前的完整清理：摘回调 + 停蒙太奇 + 结束任务。
+	 *
+	 * 三件事缺一不可，原因写在 .cpp 的实现里。
+	 */
+	void StopCurrentSegmentMontage();
+
+	/**
+	 * 判断一条来自 AnimNotify 的 GameplayEvent 是不是**当前这一段**发出的。
+	 *
+	 * ══════════════════════════════════════════════════════════════════
+	 * 【为什么需要它】
+	 * ══════════════════════════════════════════════════════════════════
+	 * 引擎在蒙太奇被停掉时，会**主动给所有还活着的 NotifyState 补发 NotifyEnd**
+	 * （`UAnimInstance::TriggerMontageEndedEvent`，AnimInstance.cpp:2507，
+	 *  原注释："Send end notifications for anim notify state when we are stopped"）。
+	 *
+	 * 而连段接下一段的做法恰恰就是"停掉上一段的蒙太奇"。于是：
+	 *
+	 *     第 N 段窗口开启 → 接上第 N+1 段 → 第 N 段蒙太奇被停
+	 *       → 引擎补发第 N 段的「窗口关闭」 → 下一帧到达 GA
+	 *       → 若 GA 不辨来源，会当成"当前这段的窗口关闭"处理
+	 *       → 顺手把缓存里的下一次按键吃掉，凭空多跳一段
+	 *
+	 * 表现是"快速连打时会跳段 / 连招打不全"，且只在连打时复现。
+	 *
+	 * 判据是 Notify 在事件里带上的来源蒙太奇（`OptionalObject2`）。
+	 * 老资产没带这个字段时**放行**（向后兼容），不会因为忘配而完全不触发。
+	 */
+	bool IsEventFromCurrentSegment(const FGameplayEventData& Payload) const;
 };

@@ -7,6 +7,8 @@
 #include "RPG_GA_HeavyAttack.generated.h"
 
 class URPG_AbilityTask_WeaponTrace;
+class UAbilityTask_PlayMontageAndWait;
+class UAnimMontage;
 
 /**
  * 重击 —— 一个能力，两种形态。
@@ -84,6 +86,51 @@ private:
 	void ReleaseCharge();
 
 	// ══════════════════════════════════════════════════════════════════
+	//  蓄力标签同步
+	// ══════════════════════════════════════════════════════════════════
+	// 蓄力状态既不用 bool 成员、也不用 GE 表达，而是挂成 GameplayTag。
+	// 理由和"是否攻击中"一样：标签是谁都能查的公共状态，
+	// 而成员变量只有 Cast 到本类才读得到 —— GA 实例还会随能力结束被回收。
+	//
+	// 顺带解决了动画要显示"蓄到第几段"的需求：
+	// 段位本身就是 State.Attack.Charging.Lv1/2/3 三个标签。
+
+	/** 把蓄力标签同步到指定段位（会先摘掉上一次挂的） */
+	void UpdateChargeTags(int32 NewLevel);
+
+	/** 摘掉全部蓄力标签。释放、被打断、能力结束时都要调 */
+	void ClearChargeTags();
+
+	// ══════════════════════════════════════════════════════════════════
+	//  蒙太奇任务的清理
+	// ══════════════════════════════════════════════════════════════════
+	// 和轻击连段是同一类问题：一个能力里先后播多段蒙太奇时，
+	// 上一段的蒙太奇和它的 PlayMontageAndWait 任务会继续活着，
+	// 在它自己动画播完/被打断时广播回调，干扰当前这一段的判断。
+	//
+	// 本能力的播放顺序：
+	//     切手技：ComboTransition（一次）
+	//     蓄力：  ChargeStart → ChargeLoop → Release
+	// 每次换段都必须先把上一段拆干净。
+
+	/** 当前正在播的蒙太奇任务 */
+	UPROPERTY()
+	TObjectPtr<UAbilityTask_PlayMontageAndWait> CurrentStageMontageTask;
+
+	/** 当前正在播的蒙太奇 */
+	UPROPERTY()
+	TObjectPtr<UAnimMontage> CurrentStageMontage;
+
+	/** 摘掉注册在任务上的全部回调并结束任务。不停蒙太奇本身 */
+	void DetachCurrentStageMontageTask();
+
+	/** 换段前的完整清理：摘回调 + 停蒙太奇 + 结束任务 */
+	void StopCurrentStageMontage();
+
+	/** 记下刚播起来的这一段，供下次换段时清理 */
+	void TrackCurrentStageMontage(UAbilityTask_PlayMontageAndWait* Task, UAnimMontage* Montage);
+
+	// ══════════════════════════════════════════════════════════════════
 	//  事件与收尾
 	// ══════════════════════════════════════════════════════════════════
 
@@ -95,6 +142,16 @@ private:
 	UFUNCTION() void OnAttackEndEvent(FGameplayEventData Payload);
 	UFUNCTION() void OnMontageCompleted();
 	UFUNCTION() void OnMontageInterrupted();
+
+	/**
+	 * 蓄力起手动画播完。
+	 *
+	 * 注意它和 OnMontageCompleted 是**两件不同的事**：
+	 *   · 起手播完 → 进入蓄力循环姿势，能力继续
+	 *   · 释放播完 → 整套动作结束，能力结束
+	 * 合成一个回调的话，玩家按下右键的瞬间招式就打完了。
+	 */
+	UFUNCTION() void OnChargeStartMontageCompleted();
 	UFUNCTION() void OnWeaponTraceHit(const TArray<FHitResult>& Hits);
 
 	// ══════════════════════════════════════════════════════════════════
@@ -118,6 +175,15 @@ private:
 
 	/** 已累计的蓄力时间（秒） */
 	float ChargeElapsed = 0.f;
+
+	/**
+	 * 当前挂在 ASC 上的蓄力标签集合（父标签 + 段位标签）。
+	 *
+	 * 保存"挂了哪些"是为了精确摘除 —— 直接调 Clear 摘固定的几个标签也行，
+	 * 但那样一旦将来加了新标签而忘了同步两边，就会留下永久残留的状态标签。
+	 * 用集合记录实际挂上去的内容，增删永远成对。
+	 */
+	FGameplayTagContainer ActiveChargeTags;
 
 	/** 本次攻击的伤害倍率 */
 	float CurrentDamageMultiplier = 1.f;

@@ -277,3 +277,49 @@ State.Stamina.Blocked（3 秒）═══ 抑制 ═══╝
 | 跳跃/奔跑没反应 | `DA_RPG_InputConfig` 里没配 `Input.Jump` / `Input.Sprint` 的映射 |
 | 奔跑后角色一直保持高速 | 检查 `GA_Sprint` 是否被异常打断 —— `EndAbility` 里有兜底恢复速度 |
 | 启动日志显示"该能力标记为授予即激活"但没别的输出 | 被动能力激活了但没配 `Regen Effect Class`，会有一条 Warning |
+| 耐力耗尽后"很久都不恢复" | **属性越界未被钳制**（见下方说明）。BaseValue 变成负数，恢复要先把它填平 |
+| 满耐力时消耗动作，读数几乎不变 | **同上**。BaseValue 被无上限的恢复推到了 100 以上 |
+| 日志出现 `属性 Stamina 越界被钳制：xxx → yyy` | 不是报错，是**体检报告** —— 说明确实有数值跑出了 [0, Max]，这条会告诉你从多少被拉回多少 |
+
+### ★ 为什么之前耐力能跑出 [0, 100]
+
+这是个真 bug，2026-09-12 修复。
+
+**根因**：`URPG_AttributeSet` 只重写了 `PreAttributeChange`，但**GE 的 Modifier 不经过它**。
+
+引擎里这两条路是分开的（查证过源码）：
+
+| 修改途径 | 走的回调 | 出处 |
+|---|---|---|
+| 代码直接赋值（`SetStamina()`） | `PreAttributeChange` | `AttributeSet.cpp:82/95` |
+| **GE 的 Modifier（含 SetByCaller、周期效果）** | **`PreAttributeBaseChange`** | `GameplayEffect.cpp:4001` |
+
+整个 GAS 插件里 `PreAttributeChange` 只有两处调用点，都在
+`AttributeSet.cpp` 的属性拷贝函数里 —— 也就是说**我们的钳制逻辑几乎从没执行过**。
+
+引擎自己的注释早就写明了（`AttributeSet.h:226-228`）：
+
+> "This function should enforce clamping (presuming you wish to clamp
+>  the base value **along with** the final value in PreAttributeChange)"
+
+**后果**：
+
+- 耐力耗尽后继续攻击 → `-8` 照样扣 → BaseValue 变成负数
+  → `GetStamina()` 返回负数 → 界面读数长时间停在 0，表现为"很久都不恢复"
+- `GE_StaminaRegen` 每 0.25 秒 `+3.75` 且**没有上限** → 站着不动两分钟，
+  BaseValue 能涨到几百 → 之后消耗 8 点完全看不出来，表现为"满耐力时消耗还是 100%"
+
+两个症状都**不报错**，只会让人觉得"数值怪怪的"。
+
+**修法**：补上 `PreAttributeBaseChange` 重写，和 `PreAttributeChange` 共用同一套
+`ClampAttribute()` 规则，保证两条路径行为绝对一致。
+
+**并且加了一条体检日志**：只在真的发生越界时才打，以及时发现问题：
+
+```
+LogRPG_Ability: Log: [BP_RPG_Player_C_0] 属性 Stamina 越界被钳制：-5.00 → 0.00（合法区间 [0, 对应的 Max]）
+```
+
+> 📌 看到这条不代表出错 —— 它说明**某次修改确实越界了**（比如"耐力 3 点却扣了 8 点"）。
+> 钳制是正确的兜底，但如果频繁出现，说明数值平衡该调了
+> （消耗太高 / 恢复太慢 / 恢复太快导致顶到上限）。

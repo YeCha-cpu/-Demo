@@ -172,6 +172,40 @@ UAbilityTask_PlayMontageAndWait* URPG_GameplayAbilityBase::PlayMontageOrSkip(
 		return nullptr;
 	}
 
+	// ══════════════════════════════════════════════════════════════════
+	//  混合时间体检 ★
+	// ══════════════════════════════════════════════════════════════════
+	// 新建的蒙太奇，Blend In / Blend Out 默认各是 **0.25 秒**
+	// （UAnimMontage 构造函数，AnimMontage.cpp:76-77）。
+	//
+	// 对一段 0.6 秒的攻击动画来说，这意味着：
+	//     0.00 ~ 0.25 秒   从移动姿势淡入（此时角色大半还保持站姿）
+	//     0.25 ~ 0.35 秒   唯一"打满"的 0.1 秒
+	//     0.35 ~ 0.60 秒   淡出回移动姿势
+	// 结果就是"按了攻击键，人物只是微微动了一下"。
+	//
+	// **它不是 bug**，是引擎默认值不适合短促的攻击动作 —— 但肉眼分不清
+	// "动画太短"和"被混合吃掉了"，所以在这里让代码自己报出来。
+	//
+	// 放在这个函数里是因为它是**所有蒙太奇的必经之路**，
+	// 检查写一处就覆盖了轻击 / 重击 / 切手技 / 闪避全部路径。
+	{
+		const float MontageLength = Montage->GetPlayLength();
+		const float BlendIn = Montage->GetDefaultBlendInTime();
+		const float BlendOut = Montage->GetDefaultBlendOutTime();
+
+		if (MontageLength > 0.f && (BlendIn + BlendOut) > MontageLength * 0.5f)
+		{
+			UE_LOG(LogRPG_Ability, Warning,
+				TEXT("[%s] 蒙太奇 %s 的混合时间过长：淡入 %.2f + 淡出 %.2f = %.2f 秒，"
+				     "而动画全长只有 %.2f 秒。角色大部分时间都处于混合状态，"
+				     "看起来会像只动了一下。修法：打开该蒙太奇资产的 Details，"
+				     "把 Blend In / Blend Out 各调到 0.05~0.1 秒"),
+				*GetName(), *Montage->GetName(),
+				BlendIn, BlendOut, BlendIn + BlendOut, MontageLength);
+		}
+	}
+
 	// UE 5.8 没有 PlayMontageAndWaitForEvent（那是 UE4 社区插件的类），
 	// 所以"播动画"和"收 GameplayEvent"必须拆成两个 Task。
 	// 这里只负责播，事件监听由调用方另外建 WaitGameplayEvent。

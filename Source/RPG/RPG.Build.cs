@@ -38,7 +38,7 @@ public class RPG : ModuleRules
 			"Niagara",
 
 			// 工程已启用这两个插件但当前未使用。
-			// 保留依赖是为了阶段 4 若要把行为树换成 StateTree 时无需回头改 Build.cs。
+			// 保留依赖是为了阶段 5 若要把行为树换成 StateTree 时无需回头改 Build.cs。
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 		});

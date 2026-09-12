@@ -35,13 +35,40 @@ void URPG_AttributeSet::PreAttributeChange(const FGameplayAttribute& Attribute, 
 {
 	Super::PreAttributeChange(Attribute, NewValue);
 
-	// ── 为什么在 PreAttributeChange 里做 clamp ──
-	// 它的调用时机最早：在属性值被真正写入**之前**修改待写入的值。
-	// 而且**任何**修改途径都会经过它——GE 的 Modifier、SetByCaller、代码里的 SetXxx，
-	// 没有例外。所以它是最可靠的兜底位置。
+	ClampAttribute(Attribute, NewValue);
+}
+
+void URPG_AttributeSet::PreAttributeBaseChange(const FGameplayAttribute& Attribute, float& NewValue) const
+{
+	Super::PreAttributeBaseChange(Attribute, NewValue);
+
+	// ★ 这里才是 GE 修改必经的那道关。
+	// 只写 PreAttributeChange 拦不住 GE —— 详见头文件里的说明。
 	//
-	// 代价：拿不到"是谁改的"这类上下文（那要用 PostGameplayEffectExecute）。
-	// 另外注意 NewValue 是引用参数，改它不会触发属性变化回调，也不会递归。
+	// 和 PreAttributeChange 共用同一套规则，保证
+	// "直接赋值"和"GE 修改"两条路径的结果必然一致。
+	const float Requested = NewValue;
+	ClampAttribute(Attribute, NewValue);
+
+	// ── 诊断：只在**真的**发生了越界时才打日志 ──
+	// 这段是为了回答"耐力是不是跑到 [0,100] 外面去了"这类怀疑。
+	// 正常情况下永不触发；一旦触发，说明数值平衡或某处配置有问题，
+	// 而这条日志会直接告诉你是哪个属性、从多少被拉回多少。
+	if (!FMath::IsNearlyEqual(NewValue, Requested))
+	{
+		UE_LOG(LogRPG_Ability, Log,
+			TEXT("[%s] 属性 %s 越界被钳制：%.2f → %.2f（合法区间 [0, 对应的 Max]）"),
+			*GetNameSafe(GetOwningActor()),
+			*Attribute.GetName(), Requested, NewValue);
+	}
+}
+
+void URPG_AttributeSet::ClampAttribute(const FGameplayAttribute& Attribute, float& NewValue) const
+{
+	// ── 为什么钳制放这里 ──
+	// Pre*AttributeChange 的调用时机最早：在属性值被真正写入**之前**修改待写入的值。
+	// 代价是拿不到"是谁改的"这类上下文（那要用 PostGameplayEffectExecute）。
+	// 另外 NewValue 是引用参数，改它不会触发属性变化回调，也不会递归。
 
 	if (Attribute == GetHealthAttribute())
 	{

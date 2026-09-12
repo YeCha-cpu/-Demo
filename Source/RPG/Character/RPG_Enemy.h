@@ -47,7 +47,7 @@ public:
 	URPG_AbilitySystemComponent* GetRPGAbilitySystemComponent() const { return AbilitySystemComponent; }
 
 	// ══════════════════════════════════════════════════════════════════
-	//  AI 数据（阶段 4 的行为树会读这些）
+	//  AI 数据（阶段 5 的行为树会读这些）
 	// ══════════════════════════════════════════════════════════════════
 
 	/**
