@@ -9,6 +9,7 @@
 #include "GameFramework/SpringArmComponent.h"
 
 #include "AbilitySystem/RPG_AttributeSet.h"
+#include "Combat/RPG_CombatComponent.h"
 #include "Core/RPG_GameplayTags.h"
 #include "Core/RPG_LogChannels.h"
 
@@ -52,6 +53,10 @@ ARPG_BaseCharacter::ARPG_BaseCharacter()
 
 	// 没有这一句，Crouch() 会静默失败（角色蹲不下去，也不报错，很难查）
 	Movement->GetNavAgentPropertiesRef().bCanCrouch = true;
+
+	// ── 战斗组件 ──
+	// 敌我共用，且不依赖 ASC，所以放在基类而不是两个子类里各建一份。
+	CombatComponent = CreateDefaultSubobject<URPG_CombatComponent>(TEXT("CombatComponent"));
 }
 
 void ARPG_BaseCharacter::BeginPlay()

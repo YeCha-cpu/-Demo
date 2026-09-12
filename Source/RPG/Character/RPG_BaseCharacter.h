@@ -14,6 +14,7 @@ class USpringArmComponent;
 class UCameraComponent;
 class UAbilitySystemComponent;
 class URPG_AttributeSet;
+class URPG_CombatComponent;
 class UGameplayAbility;
 class UGameplayEffect;
 
@@ -90,6 +91,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "RPG|Movement")
 	float GetWalkSpeed() const { return WalkSpeed; }
 
+	/**
+	 * 战斗组件：输入缓存、连段索引、当前攻击模组。
+	 * GA 通过它读取"当前该打第几段"。
+	 */
+	UFUNCTION(BlueprintPure, Category = "RPG|Combat")
+	URPG_CombatComponent* GetCombatComponent() const { return CombatComponent; }
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -117,6 +125,16 @@ protected:
 	/** 跟随相机。挂在弹簧臂末端，自己不旋转，由弹簧臂带动 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "RPG|Camera")
 	TObjectPtr<UCameraComponent> FollowCamera;
+
+	/**
+	 * 战斗状态组件（敌我共用）。
+	 *
+	 * 它**不依赖任何 GAS 类** —— 只持有输入缓存、连段索引、当前攻击模组。
+	 * 这样设计的好处是：战斗逻辑可以脱离 GAS 单独测试，
+	 * 而且将来加召唤物、可破坏物之类没有 ASC 的 Actor 也能直接复用。
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "RPG|Combat")
+	TObjectPtr<URPG_CombatComponent> CombatComponent;
 
 	// ══════════════════════════════════════════════════════════════════
 	//  相机参数
