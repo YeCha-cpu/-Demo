@@ -32,6 +32,11 @@ namespace RPGTags
 	//  Ability
 	// ══════════════════════════════════════════════════════════════════
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Attack_Light, "Ability.Attack.Light", "轻击能力（5 段连段）");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Attack_Light_01, "Ability.Attack.Light.01", "轻击能力（5 段连段）01");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Attack_Light_02, "Ability.Attack.Light.02", "轻击能力（5 段连段）02");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Attack_Light_03, "Ability.Attack.Light.03", "轻击能力（5 段连段）03");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Attack_Light_04, "Ability.Attack.Light.04", "轻击能力（5 段连段）04");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Attack_Light_05, "Ability.Attack.Light.05", "轻击能力（5 段连段）05");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Attack_Heavy, "Ability.Attack.Heavy", "重击能力（3 段蓄力 + 切手技）");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Dodge,        "Ability.Dodge",        "闪避能力（含无敌帧）");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Sprint,       "Ability.Sprint",       "奔跑能力（持续消耗耐力）");

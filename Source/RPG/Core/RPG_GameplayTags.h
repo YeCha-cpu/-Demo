@@ -66,6 +66,11 @@ namespace RPGTags
 	//  用 ASC->TryActivateAbilitiesByTag() 触发；也用作 GA 的 AssetTags
 	// ══════════════════════════════════════════════════════════════════
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Attack_Light);
+	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Attack_Light_01);
+	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Attack_Light_02);
+	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Attack_Light_03);
+	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Attack_Light_04);
+	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Attack_Light_05);
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Attack_Heavy);
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Dodge);
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Sprint);

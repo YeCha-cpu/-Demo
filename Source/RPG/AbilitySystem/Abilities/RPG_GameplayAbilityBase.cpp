@@ -48,16 +48,53 @@ bool URPG_GameplayAbilityBase::CanActivateAbility(
 {
 	if (!Super::CanActivateAbility(Handle, ActorInfo, SourceTags, TargetTags, OptionalRelevantTags))
 	{
+		// ⚠️ 父类拒绝时**必须**把原因打出来。
+		// 引擎在这里只会往 OptionalRelevantTags 填一个标签就返回 false，
+		// 不打印任何东西 —— 表现为"按键没反应，日志一片空白"，
+		// 排查时完全无从下手（这个坑我们踩过）。
+		UE_LOG(LogRPG_Ability, Warning,
+			TEXT("[%s] CanActivateAbility 被引擎拒绝。原因标签：%s"),
+			*GetName(),
+			(OptionalRelevantTags && !OptionalRelevantTags->IsEmpty())
+				? *OptionalRelevantTags->ToStringSimple()
+				: TEXT("(空) —— 常见原因：标签阻断 / 冷却中 / Cost 资源不足 / 未满足 ActivationRequiredTags"));
+
+		return false;
+	}
+
+	// ══════════════════════════════════════════════════════════════════
+	//  ⚠️ 这里必须用参数里的 ActorInfo，绝不能用 GetAbilitySystemComponentFromActorInfo()
+	// ══════════════════════════════════════════════════════════════════
+	// 这是 GAS 里一个非常隐蔽的坑，我们实际踩过：
+	//
+	// CanActivateAbility 的调用时机比直觉更早 —— 它在**能力实例化之前**
+	// 就要判断"这个能力现在能不能激活"。那时 this 指向的是 CDO（类默认对象），
+	// 而 CDO 的 CurrentActorInfo **永远是空的**。
+	//
+	// 所以凡是走 CurrentActorInfo 的便捷函数（GetAbilitySystemComponentFromActorInfo、
+	// GetAvatarActorFromActorInfo 等）在这里全部返回 nullptr —— 结果是
+	// **能力永远无法激活**，而且日志里的表现极具误导性：
+	// 会显示成"拿不到 ASC / ActorInfo 没初始化"，让人往角色初始化方向去查，
+	// 实际上调用方传进来的 ActorInfo 完全是好的。
+	//
+	// 记住这条规则：**CanActivateAbility 是 const 函数，它只能依赖参数，
+	// 不能依赖任何实例状态。**
+	if (!ActorInfo || !ActorInfo->AbilitySystemComponent.IsValid())
+	{
+		UE_LOG(LogRPG_Ability, Warning,
+			TEXT("[%s] CanActivateAbility 失败：传入的 ActorInfo 无效，或它没有关联 ASC"), *GetName());
+
 		return false;
 	}
 
 	// ── 死亡检查 ──
-	// 虽然上面已经用 ActivationBlockedTags 加了 State.Dead，这里再判一次是因为
+	// 虽然基类已经用 ActivationBlockedTags 加了 State.Dead，这里再判一次是因为
 	// 标签阻断依赖 GE 正确授予标签 —— 如果将来有别的途径让角色"死亡但没标签"
 	// （比如脚本直接扣血到 0 而没走属性集），这道检查能兜住。
-	const UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo();
-	if (!ASC || ASC->HasMatchingGameplayTag(RPGTags::State_Dead))
+	const UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
+	if (ASC->HasMatchingGameplayTag(RPGTags::State_Dead))
 	{
+		UE_LOG(LogRPG_Ability, Verbose, TEXT("[%s] CanActivateAbility 失败：角色处于死亡状态"), *GetName());
 		return false;
 	}
 
@@ -234,6 +271,11 @@ void URPG_GameplayAbilityBase::ConsumeStamina(float Amount)
 
 bool URPG_GameplayAbilityBase::HasEnoughStamina(float Amount) const
 {
+	// ⚠️ 本方法依赖 CurrentActorInfo，因此**不能在 CanActivateAbility 里调用**
+	// （那个时机 this 可能是 CDO，CurrentActorInfo 为空，会拿不到属性集）。
+	// 目前它只被当作"激活后"的辅助判断使用。
+	// 如果将来要在 CanActivateAbility 里做耐力前置检查，需要改成接收
+	// 参数里的 ActorInfo 版本。
 	const URPG_AttributeSet* Attributes = GetRPGAttributeSet();
 	if (!Attributes)
 	{

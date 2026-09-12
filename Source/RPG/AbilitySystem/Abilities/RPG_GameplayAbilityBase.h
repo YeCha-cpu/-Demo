@@ -53,7 +53,14 @@ public:
 	//  便捷查询
 	// ══════════════════════════════════════════════════════════════════
 
-	/** 能力持有者对应的 RPG 角色。取不到返回 nullptr */
+	/**
+	 * 能力持有者对应的 RPG 角色。取不到返回 nullptr
+	 *
+	 * ⚠️ 只能在 **ActivateAbility 及之后**调用（包括各种事件回调）。
+	 * 它依赖 CurrentActorInfo，而 CanActivateAbility 可能在 CDO 上执行，
+	 * 那时 CurrentActorInfo 是空的，会返回 nullptr —— 详见
+	 * RPG_GameplayAbilityBase.cpp 里 CanActivateAbility 的说明。
+	 */
 	UFUNCTION(BlueprintPure, Category = "RPG|Ability")
 	ARPG_BaseCharacter* GetRPGCharacter() const;
 

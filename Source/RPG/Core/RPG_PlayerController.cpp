@@ -346,14 +346,29 @@ void ARPG_PlayerController::OnJumpCompleted()
 
 void ARPG_PlayerController::OnAbilityInputPressed(FGameplayTag InputTag)
 {
-	if (URPG_AbilitySystemComponent* ASC = GetRPGAbilitySystemComponent())
+	// 这条日志是排查"按键没反应"的**第一个检查点**：
+	// 能看到它 → 说明按键、IMC、InputConfig 三层的映射都是通的，问题在 GAS 侧；
+	// 看不到它 → 说明上面三层里有一层断了（绝大多数情况是 IMC 里没配这个按键）。
+	UE_LOG(LogRPG_Ability, Log, TEXT("[%s] 收到能力输入：%s"), *GetName(), *InputTag.ToString());
+
+	URPG_AbilitySystemComponent* ASC = GetRPGAbilitySystemComponent();
+
+	if (!ASC)
 	{
-		// 注意：这里**不做**任何"能不能放"的前置判断 ——
-		// 那是 GA 的 CanActivateAbility 和 GE 的标签阻断该管的事。
-		// 控制器只负责把玩家的意图送达，判断权在能力系统内部。
-		// 这样将来加新规则（耐力不足、状态禁止）不用回来改这里。
-		ASC->TryActivateAbilityByInputTag(InputTag);
+		// 拿不到 ASC 几乎总是因为 PlayerStateClass 没指向 RPG_PlayerState 的蓝图子类
+		// —— 玩家的 ASC 挂在 PlayerState 上，那一环断了这里就永远是空。
+		UE_LOG(LogRPG_Ability, Warning,
+			TEXT("[%s] 拿不到 ASC，输入 %s 无法处理 —— "
+			     "请检查 GameMode 的 PlayerStateClass 是否指向 RPG_PlayerState 的蓝图子类"),
+			*GetName(), *InputTag.ToString());
+		return;
 	}
+
+	// 注意：这里**不做**任何"能不能放"的前置判断 ——
+	// 那是 GA 的 CanActivateAbility 和 GE 的标签阻断该管的事。
+	// 控制器只负责把玩家的意图送达，判断权在能力系统内部。
+	// 这样将来加新规则（耐力不足、状态禁止）不用回来改这里。
+	ASC->TryActivateAbilityByInputTag(InputTag);
 }
 
 void ARPG_PlayerController::OnAbilityInputReleased(FGameplayTag InputTag)

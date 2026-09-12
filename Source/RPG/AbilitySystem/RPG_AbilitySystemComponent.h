@@ -80,6 +80,24 @@ public:
 	bool HasAbilityForInputTag(FGameplayTag InputTag) const;
 
 protected:
+	virtual void BeginPlay() override;
+
+	/**
+	 * 能力激活失败的回调。
+	 *
+	 * ══════════════════════════════════════════════════════════════════
+	 * 【为什么必须自己接这个回调】
+	 * ══════════════════════════════════════════════════════════════════
+	 * GAS 的 TryActivateAbility 失败时**默认不打印任何日志** ——
+	 * 它只在 CanActivateAbility 里往 OptionalRelevantTags 填一个原因标签，
+	 * 然后就返回 false 了。结果就是"按键没反应，日志一片空白"，
+	 * 这是 GAS 调试体验最差的地方之一。
+	 *
+	 * AbilityFailedCallbacks 专门用来补这个盲区：它把失败原因标签带出来，
+	 * 让我们能直接告诉开发者是冷却、资源不足、还是被标签阻断。
+	 */
+	void OnAbilityActivationFailed(const UGameplayAbility* Ability, const FGameplayTagContainer& FailureTags);
+
 	/**
 	 * 输入标签 → 能力类 的映射表。只用于注册阶段，运行期激活走下面的 Handle 表。
 	 */
@@ -91,4 +109,13 @@ protected:
 	 * 注册后立即填充，是运行期查找的唯一依据。
 	 */
 	TMap<FGameplayTag, FGameplayAbilitySpecHandle> InputTagToSpecHandle;
+
+	/**
+	 * 已经警告过"没有绑定能力"的输入标签。
+	 *
+	 * 这个查询会在每次按键时发生。"没绑能力"属于配置错误而不是运行时异常，
+	 * 值得用 Warning 级别报出来 —— 之前用 Verbose，导致按键没反应时日志里
+	 * 一片空白，完全无从下手。但玩家连打时会反复触发，所以用这个集合去重。
+	 */
+	TSet<FGameplayTag> WarnedInputTags;
 };

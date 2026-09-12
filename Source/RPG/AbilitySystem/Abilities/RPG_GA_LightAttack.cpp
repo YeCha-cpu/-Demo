@@ -128,32 +128,27 @@ void URPG_GA_LightAttack::BindGameplayEventListeners()
 	// OnlyTriggerOnce 保持默认的 false —— 一轮连段里每个事件都会触发多次
 	// （5 段就有 5 组窗口开/关）。
 	{
-		UAbilityTask_WaitGameplayEvent* Task =
-			UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, RPGTags::Event_Combat_AttackWindow_Open);
+		UAbilityTask_WaitGameplayEvent* Task = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, RPGTags::Event_Combat_AttackWindow_Open);
 		Task->EventReceived.AddDynamic(this, &URPG_GA_LightAttack::OnAttackWindowOpen);
 		Task->ReadyForActivation();
 	}
 	{
-		UAbilityTask_WaitGameplayEvent* Task =
-			UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, RPGTags::Event_Combat_AttackWindow_Close);
+		UAbilityTask_WaitGameplayEvent* Task = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, RPGTags::Event_Combat_AttackWindow_Close);
 		Task->EventReceived.AddDynamic(this, &URPG_GA_LightAttack::OnAttackWindowClose);
 		Task->ReadyForActivation();
 	}
 	{
-		UAbilityTask_WaitGameplayEvent* Task =
-			UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, RPGTags::Event_Combat_ComboWindow_Open);
+		UAbilityTask_WaitGameplayEvent* Task = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, RPGTags::Event_Combat_ComboWindow_Open);
 		Task->EventReceived.AddDynamic(this, &URPG_GA_LightAttack::OnComboWindowOpen);
 		Task->ReadyForActivation();
 	}
 	{
-		UAbilityTask_WaitGameplayEvent* Task =
-			UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, RPGTags::Event_Combat_ComboWindow_Close);
+		UAbilityTask_WaitGameplayEvent* Task = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, RPGTags::Event_Combat_ComboWindow_Close);
 		Task->EventReceived.AddDynamic(this, &URPG_GA_LightAttack::OnComboWindowClose);
 		Task->ReadyForActivation();
 	}
 	{
-		UAbilityTask_WaitGameplayEvent* Task =
-			UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, RPGTags::Event_Combat_AttackEnd);
+		UAbilityTask_WaitGameplayEvent* Task = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, RPGTags::Event_Combat_AttackEnd);
 		Task->EventReceived.AddDynamic(this, &URPG_GA_LightAttack::OnAttackEndEvent);
 		Task->ReadyForActivation();
 	}
