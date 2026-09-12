@@ -49,6 +49,23 @@ public:
 		const FGameplayTagContainer* TargetTags = nullptr,
 		OUT FGameplayTagContainer* OptionalRelevantTags = nullptr) const override;
 
+	/**
+	 * 输入释放回调。
+	 *
+	 * 按住型能力（重击蓄力）重写它来响应"玩家松开按键"。
+	 * 瞬发能力不需要处理 —— 所以这里是**空实现而不是纯虚函数**。
+	 *
+	 * 调用链：
+	 *   PlayerController 收到 EnhancedInput 的 Completed 事件
+	 *     → ASC::NotifyInputReleased(InputTag)
+	 *       → 找到该输入标签对应的激活中能力实例
+	 *         → 本函数
+	 *
+	 * 注意：只有能力**正在激活中**才会收到这个回调。如果松开时能力已经结束，
+	 * 调用链在 Spec->GetPrimaryInstance() 那一步就断了，不会走到这里。
+	 */
+	virtual void OnInputReleased() {}
+
 	// ══════════════════════════════════════════════════════════════════
 	//  便捷查询
 	// ══════════════════════════════════════════════════════════════════
@@ -116,6 +133,19 @@ protected:
 	 * 而不是激活后再扣成负数。
 	 */
 	bool HasEnoughStamina(float Amount) const;
+
+	/**
+	 * 没有蒙太奇时的简化命中检测：在角色身前做一次球形检测并施加伤害。
+	 *
+	 * ⚠️ 这是**纯开发期辅助**，不是最终实现。它的价值在于让连段推进、
+	 * 伤害结算、耐力消耗三条链路在动画做好之前就能独立验证 ——
+	 * 动画接上后由 WeaponTrace 接管，这个函数不再被调用。
+	 *
+	 * @param DamageMultiplier 伤害倍率
+	 * @param ForwardOffset    检测中心相对角色的前向偏移（厘米）
+	 * @param Radius           检测球半径（厘米）
+	 */
+	void PerformSimulatedMeleeHit(float DamageMultiplier, float ForwardOffset = 150.f, float Radius = 80.f);
 
 	// ══════════════════════════════════════════════════════════════════
 	//  GE 配置（在 GA 蓝图子类里指定）

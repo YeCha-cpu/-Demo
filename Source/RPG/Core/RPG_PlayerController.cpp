@@ -396,9 +396,17 @@ void ARPG_PlayerController::OnAbilityInputPressed(FGameplayTag InputTag)
 
 void ARPG_PlayerController::OnAbilityInputReleased(FGameplayTag InputTag)
 {
-	// 阶段 2 会在这里通知"按住型"能力（重击蓄力）执行释放逻辑。
-	// 现在留空是有意的：瞬发技能不需要释放处理，而按住型能力尚未实现。
-	UE_LOG(LogRPG_Ability, VeryVerbose, TEXT("输入释放：%s"), *InputTag.ToString());
+	UE_LOG(LogRPG_Ability, Verbose, TEXT("[%s] 输入释放：%s"), *GetName(), *InputTag.ToString());
+
+	if (URPG_AbilitySystemComponent* ASC = GetRPGAbilitySystemComponent())
+	{
+		// 交给 ASC 去找"这个输入标签对应的、当前正在激活的能力"，
+		// 然后调用它的 OnInputReleased()。
+		//
+		// 瞬发能力对这个调用无感（基类默认空实现）；
+		// 按住型能力（重击蓄力）靠它知道玩家松手了。
+		ASC->NotifyInputReleased(InputTag);
+	}
 }
 
 // ══════════════════════════════════════════════════════════════════════

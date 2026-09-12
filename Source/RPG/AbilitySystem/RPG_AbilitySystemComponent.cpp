@@ -4,6 +4,7 @@
 
 #include "Abilities/GameplayAbility.h"
 #include "GameplayAbilitySpec.h"
+#include "AbilitySystem/Abilities/RPG_GameplayAbilityBase.h"
 #include "Core/RPG_LogChannels.h"
 
 URPG_AbilitySystemComponent::URPG_AbilitySystemComponent()
@@ -161,4 +162,36 @@ bool URPG_AbilitySystemComponent::TryActivateAbilityByInputTag(FGameplayTag Inpu
 bool URPG_AbilitySystemComponent::HasAbilityForInputTag(FGameplayTag InputTag) const
 {
 	return InputTagToSpecHandle.Contains(InputTag);
+}
+
+void URPG_AbilitySystemComponent::NotifyInputReleased(FGameplayTag InputTag)
+{
+	const FGameplayAbilitySpecHandle* HandlePtr = InputTagToSpecHandle.Find(InputTag);
+	if (!HandlePtr || !HandlePtr->IsValid())
+	{
+		// 这个输入可能压根没绑能力。静默返回 —— 按下时已经警告过一次了，
+		// 松开再报一遍只是噪音。
+		return;
+	}
+
+	FGameplayAbilitySpec* Spec = FindAbilitySpecFromHandle(*HandlePtr);
+	if (!Spec)
+	{
+		return;
+	}
+
+	// 取能力实例。
+	// 注意 NonInstanced 的能力没有实例（直接在 CDO 上执行），拿不到可调用的对象。
+	// 我们所有 GA 都是 InstancedPerActor，所以正常都能取到。
+	UGameplayAbility* Ability = Spec->GetPrimaryInstance();
+	if (!Ability)
+	{
+		return;
+	}
+
+	if (URPG_GameplayAbilityBase* RPGAbility = Cast<URPG_GameplayAbilityBase>(Ability))
+	{
+		// 瞬发能力对这个调用无感（基类默认空实现）
+		RPGAbility->OnInputReleased();
+	}
 }

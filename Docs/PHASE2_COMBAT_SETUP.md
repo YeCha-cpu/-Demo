@@ -260,3 +260,167 @@ PIE 里攻击应该能看到动画播放，伤害出现在判定窗口开启的�
 | 一次攻击打出多段伤害 | 判定窗口拖得太长（去重只防同一目标重复，不防窗口过长） |
 
 排查时先过滤 `LogRPG_Combat` 和 `LogRPG_Ability`，代码里的日志写了具体原因。
+
+---
+
+# 批次 2 · 重击蓄力 / 切手技 / 闪避
+
+> 批次 1 验证通过后再做这部分。这三样共用批次 1 建立的基础设施
+> （攻击模组、伤害 GE、事件监听），所以配置量不大。
+
+## 步骤 8 · 重击（蓄力 + 切手技）
+
+### 8.1 在 `DA_AttackModule_Unarmed` 里配 Heavy Attack
+
+**`HeavyAttack` 分类：**
+
+| 字段 | 值 |
+|---|---|
+| Charge Start Montage | （留空，动画做好后再填） |
+| Charge Loop Montage | （留空） |
+| Charge Stamina Drain Per Second | `10` |
+| Charge Move Speed Scale | `0.3` |
+
+**`HeavyAttack.Levels` 数组加 3 条：**
+
+| 索引 | Required Charge Time | Release Montage | Damage Multiplier | Stamina Cost |
+|---|---|---|---|---|
+| 0（第1段） | `0.5` | 留空 | **3.0** | 15 |
+| 1（第2段） | `1.0` | 留空 | **4.5** | 20 |
+| 2（第3段） | `1.8` | 留空 | **6.5** | 25 |
+
+> ⚠️ `Required Charge Time` 必须严格递增 —— 冲击模组的数据校验会检查这一点。
+> 但 `GetChargeLevelForTime` 本身做了兼容处理（取满足条件的最高级），
+> 所以即使配成乱序也不会算出错误结果，只是编辑器里会报错提示。
+
+### 8.2 配切手技
+
+**`Transition` 分类：**
+
+| 字段 | 值 |
+|---|---|
+| Combo Transition Montage | （留空） |
+| Combo Transition Multiplier | `2.5` |
+| Combo Transition Stamina Cost | `15` |
+
+### 8.3 创建 `GA_HeavyAttack` 蓝图
+
+同 `GA_LightAttack` 的做法（`Content/_My/GAS/GA/`，父类选 `RPG_GA_HeavyAttack`），
+配好 `Damage Effect Class` 和 `Stamina Cost Effect Class`。
+
+### 8.4 挂到角色
+
+`BP_RPG_Player` 的 `Startup Abilities` 加一条：
+`Input.Attack.Heavy` → `GA_HeavyAttack`
+
+---
+
+## 步骤 9 · 闪避
+
+### 9.1 创建 `GE_Invulnerable` ⚠️ 关键
+
+这是无敌帧的载体，配错了闪避就没有无敌效果。
+
+`Content/_My/GAS/GE/` → 右键 → Gameplay Effect，命名 `GE_Invulnerable`
+
+| 字段 | 值 |
+|---|---|
+| Duration Policy | **Has Duration** |
+| Duration Magnitude | `5.0`（秒） |
+
+**然后加组件**：Details 面板 → **`Components` 数组** → `+` → 选 **`Target Tags`**
+
+| 组件内字段 | 值 |
+|---|---|
+| Add Tags | **`State.Invulnerable`** |
+
+> ⚠️ **必须用 `Target Tags` 组件**（`UTargetTagsGameplayEffectComponent`）。
+> 老教程里说的 `GrantedTags` 内联字段在 UE 5.3 就被废弃了，5.8 的 Details
+> 面板里根本找不到它。
+>
+> 持续时间设 5 秒只是"上限"—— GA 会在无敌帧结束时**主动移除**这个 GE，
+> 所以实际无敌时长由动画上的 Notify 决定，不是这 5 秒。
+
+### 9.2 创建 `GA_Dodge` 蓝图
+
+| 分类 | 字段 | 值 |
+|---|---|---|
+| `RPG\|Dodge` | Invulnerability Effect Class | **`GE_Invulnerable`** |
+| `RPG\|Dodge` | Dodge Montage | （留空，动画做好后再填） |
+| `RPG\|Dodge` | Stamina Cost | `20` |
+| `RPG\|Dodge` | Dodge Impulse | `1200` |
+| `RPG\|Debug` | Simulated Dodge Duration | `0.7` |
+| `RPG\|Debug` | Simulated Invulnerability Ratio | `0.6` |
+
+### 9.3 挂到角色
+
+`Startup Abilities` 加一条：`Input.Dodge` → `GA_Dodge`
+
+---
+
+## 步骤 10 · 测试批次 2
+
+### 重击蓄力
+
+**按住右键不放**，日志应该逐级升段：
+
+```
+开始蓄力（最长 3.0 秒，每秒耗耐力 10.0）
+蓄力升到 1 段（0.50 秒）
+蓄力升到 2 段（1.00 秒）
+蓄力升到 3 段（1.80 秒）
+```
+
+**松手**：
+
+```
+松手，按 2.10 秒的蓄力释放
+释放蓄力重击（3 段，倍率 6.50，耐力 25.0）
+```
+
+**按一下立刻松**（不足 0.5 秒）→ 按第 1 段释放，倍率 3.0。
+
+**按住不放超过 3 秒** → 自动释放。
+**蓄力期间耐力耗尽** → 强制释放。
+
+### 切手技
+
+先左键打轻击，**在轻击动画播放期间**按右键：
+
+```
+轻击第 1 段（倍率 1.00，耐力 8.0）
+切手技（倍率 2.50，耐力 15.0）
+```
+
+> 切手技不蓄力 —— 它是"变招"，按下去立刻出招。
+
+### 闪避
+
+```
+闪避（耐力 20.0，冲量 1200）
+无敌帧开始
+无敌帧结束
+```
+
+**验证无敌是否真的生效**：让敌人打你（或者手动用 `GE_Damage` 打自己），
+在无敌帧窗口内应该看到：
+
+```
+[BP_RPG_Player_C_0] 伤害被无敌帧挡下：9.1
+```
+
+这条日志来自 `URPG_AttributeSet::PostGameplayEffectExecute` 的兜底检查。
+
+---
+
+## 批次 2 常见问题排查
+
+| 症状 | 最可能的原因 |
+|---|---|
+| 按右键永远是蓄力，切手技不触发 | 轻击 GA 的 `Activation Owned Tags` 里没有 `Ability.Attack.Light`（C++ 里已加，检查蓝图有没有覆盖成空） |
+| 蓄力不升段 | `HeavyAttack.Levels` 的 `Required Charge Time` 没配，或全是 0 |
+| 松手没反应 | 输入释放链路断了 —— 看有没有 `输入释放：Input.Attack.Heavy` 日志；没有的话是 IMC 里右键的映射没配 `Completed` 触发 |
+| 一直蓄力不释放 | `Max Charge Time` 配得过大；或耐力没在掉（`Charge Stamina Drain Per Second` 为 0） |
+| 闪避没有无敌 | `GE_Invulnerable` 没加 `Target Tags` 组件，或 GA 里没配 `Invulnerability Effect Class` |
+| 闪避后一直无敌 | 无敌 GE 没被移除 —— 检查是否有别的途径给了无敌标签 |
+| 切手技把轻击打断后角色定住 | `GA_HeavyAttack` 的 `Transition Montage` 配了但 GA 没收到 `Attack End` 通知 |

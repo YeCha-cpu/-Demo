@@ -79,6 +79,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "RPG|AbilitySystem")
 	bool HasAbilityForInputTag(FGameplayTag InputTag) const;
 
+	/**
+	 * 通知"某个输入被松开"。
+	 *
+	 * 按住型能力（重击蓄力）靠它知道玩家什么时候松手。
+	 * 实现是：从输入标签找到对应的已激活能力实例，调用它的 OnInputReleased()。
+	 *
+	 * 为什么不让 GA 自己监听输入？因为那要求能力知道输入层的存在，
+	 * 破坏"能力不关心按键"的分层。由 ASC 充当这个翻译官更合适 ——
+	 * 能力只需要知道自己"被松开了"，不需要知道是哪个键、更不需要知道
+	 * 是键盘还是手柄。
+	 */
+	void NotifyInputReleased(FGameplayTag InputTag);
+
 protected:
 	virtual void BeginPlay() override;
 

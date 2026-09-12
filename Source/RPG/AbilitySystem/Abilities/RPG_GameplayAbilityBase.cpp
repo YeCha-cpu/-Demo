@@ -6,6 +6,8 @@
 #include "AbilitySystemComponent.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Animation/AnimMontage.h"
+#include "Engine/OverlapResult.h"
+#include "Engine/World.h"
 
 #include "AbilitySystem/RPG_AttributeSet.h"
 #include "Character/RPG_BaseCharacter.h"
@@ -289,6 +291,48 @@ void URPG_GameplayAbilityBase::ConsumeStamina(float Amount)
 
 	UE_LOG(LogRPG_Combat, Verbose,
 		TEXT("[%s] 消耗耐力 %.1f"), *GetNameSafe(GetAvatarActorFromActorInfo()), Amount);
+}
+
+void URPG_GameplayAbilityBase::PerformSimulatedMeleeHit(
+	float DamageMultiplier,
+	float ForwardOffset,
+	float Radius)
+{
+	AActor* Avatar = GetAvatarActorFromActorInfo();
+	UWorld* World = Avatar ? Avatar->GetWorld() : nullptr;
+
+	if (!Avatar || !World)
+	{
+		return;
+	}
+
+	const FVector Origin = Avatar->GetActorLocation()
+		+ Avatar->GetActorForwardVector() * ForwardOffset;
+
+	TArray<FOverlapResult> Overlaps;
+
+	FCollisionQueryParams Params(TEXT("RPGSimulatedHit"), /*bTraceComplex*/ false, Avatar);
+	const FCollisionShape Shape = FCollisionShape::MakeSphere(Radius);
+
+	World->OverlapMultiByChannel(Overlaps, Origin, FQuat::Identity, ECC_Pawn, Shape, Params);
+
+	// 去重：一次 Overlap 可能对同一个 Actor 返回多个结果（多个碰撞体）
+	TSet<AActor*> UniqueTargets;
+
+	for (const FOverlapResult& Overlap : Overlaps)
+	{
+		AActor* HitActor = Overlap.GetActor();
+		if (HitActor && !UniqueTargets.Contains(HitActor))
+		{
+			UniqueTargets.Add(HitActor);
+			ApplyDamageToTarget(HitActor, DamageMultiplier, nullptr);
+		}
+	}
+
+	if (UniqueTargets.Num() == 0)
+	{
+		UE_LOG(LogRPG_Combat, Verbose, TEXT("[%s] 模拟命中：身前没有目标"), *GetName());
+	}
 }
 
 bool URPG_GameplayAbilityBase::HasEnoughStamina(float Amount) const

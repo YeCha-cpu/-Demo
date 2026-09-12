@@ -24,6 +24,18 @@ URPG_GA_LightAttack::URPG_GA_LightAttack()
 	// 其他系统可以据此做查询（比如"正在攻击时禁止移动"这类规则），
 	// 也方便在 GameplayDebugger 里辨认。
 	SetAssetTags(FGameplayTagContainer(RPGTags::Ability_Attack_Light));
+
+	// ══════════════════════════════════════════════════════════════════
+	//  激活期间挂上同一个标签
+	// ══════════════════════════════════════════════════════════════════
+	// GA_HeavyAttack 靠查询这个标签判断"当前是否处于轻击连段中"，
+	// 以此决定走切手技分支还是蓄力分支。
+	// 它同时也是 CancelAbilitiesWithTag 的目标 —— 重击激活时会自动取消轻击。
+	//
+	// 为什么用标签而不是 CombatComponent 的连段索引？
+	// 索引在起手那一瞬间是 0（表示"正在打第 1 段"），无法区分
+	// "不在连段中"和"正在打第 1 段"。标签才精确表达"某个能力此刻正在激活"。
+	ActivationOwnedTags.AddTag(RPGTags::Ability_Attack_Light);
 }
 
 void URPG_GA_LightAttack::ActivateAbility(
