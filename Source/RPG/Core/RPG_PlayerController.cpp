@@ -14,6 +14,7 @@
 #include "AbilitySystem/RPG_AbilitySystemComponent.h"
 #include "AbilitySystem/RPG_AttributeSet.h"
 #include "Character/RPG_BaseCharacter.h"
+#include "Combat/RPG_CombatComponent.h"
 #include "Core/RPG_GameplayTags.h"
 #include "Core/RPG_LogChannels.h"
 #include "Input/RPG_InputConfig.h"
@@ -364,10 +365,32 @@ void ARPG_PlayerController::OnAbilityInputPressed(FGameplayTag InputTag)
 		return;
 	}
 
+	// ══════════════════════════════════════════════════════════════════
+	//  1. 先把输入推进缓存
+	// ══════════════════════════════════════════════════════════════════
+	// 这一步是连段衔接的前提。玩家在攻击动画播放期间按下的"下一段"，
+	// 不会被立即执行，而是留在缓存里，等衔接窗口打开时由 GA 取走。
+	//
+	// 如果只调 TryActivateAbilityByInputTag 而不推缓存，那么：
+	//   · 攻击进行中的按键会激活失败，然后**被彻底丢弃**
+	//   · 结果就是"连按没有衔接，只能等上一段完全播完再按"
+	if (ARPG_BaseCharacter* RPGChar = GetRPGCharacter())
+	{
+		if (URPG_CombatComponent* Combat = RPGChar->GetCombatComponent())
+		{
+			Combat->PushInputTag(InputTag);
+		}
+	}
+
+	// ══════════════════════════════════════════════════════════════════
+	//  2. 尝试激活
+	// ══════════════════════════════════════════════════════════════════
+	// 如果当前没有攻击在进行，这次激活会成功，GA 内部会消耗掉刚推入的那条输入；
+	// 如果正在攻击中，激活失败（无害），输入就留在缓存里等衔接窗口来取。
+	//
 	// 注意：这里**不做**任何"能不能放"的前置判断 ——
 	// 那是 GA 的 CanActivateAbility 和 GE 的标签阻断该管的事。
 	// 控制器只负责把玩家的意图送达，判断权在能力系统内部。
-	// 这样将来加新规则（耐力不足、状态禁止）不用回来改这里。
 	ASC->TryActivateAbilityByInputTag(InputTag);
 }
 

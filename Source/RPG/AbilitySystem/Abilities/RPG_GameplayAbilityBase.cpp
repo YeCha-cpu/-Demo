@@ -17,6 +17,28 @@
 URPG_GameplayAbilityBase::URPG_GameplayAbilityBase()
 {
 	// ══════════════════════════════════════════════════════════════════
+	//  实例化策略 —— 必须是 InstancedPerActor
+	// ══════════════════════════════════════════════════════════════════
+	// ⚠️ UE 5.8 的 UGameplayAbility 构造函数把默认值设成了
+	// InstancedPerExecution（见 GameplayAbility.cpp:102），这对我们**完全不适用**。
+	//
+	// 两种策略的区别（引擎头文件里的原话）：
+	//   InstancedPerActor      每个 Actor 一个实例，同一时刻只能有一个激活，
+	//                          **状态在激活之间保留**
+	//   InstancedPerExecution  每次执行都实例化，可同时运行多个，
+	//                          **状态不保留**
+	//
+	// 对我们的连段系统来说，InstancedPerExecution 是灾难性的：
+	//   · 连按三次会创建三个实例同时跑（各自播各的动画、各扣各的耐力）
+	//   · 连段进度（CurrentSegmentIndex）存在实例成员里，新实例永远从第 1 段开始
+	//   · bComboWindowOpen 之类的窗口状态也全部丢失
+	// 表现就是"连按没有衔接，每次都从第一段重来"。
+	//
+	// 所以显式设回 InstancedPerActor —— 连段状态必须跨激活保留，
+	// 而且我们**不希望**同一个攻击能力有多个实例同时跑。
+	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
+
+	// ══════════════════════════════════════════════════════════════════
 	//  联机策略默认值
 	// ══════════════════════════════════════════════════════════════════
 	// LocalPredicted：客户端按下按键后**立刻在本地执行**，不等服务器往返。
