@@ -65,6 +65,17 @@ public:
 	void RegisterInputAbilities(const TMap<FGameplayTag, TSubclassOf<UGameplayAbility>>& InMappings);
 
 	/**
+	 * 授予一个**被动能力**（不绑定任何输入标签）。
+	 *
+	 * 为什么需要单独的入口：RegisterInputAbility 的映射表是
+	 * "输入标签 → 能力"，而耐力恢复这类被动能力根本没有输入触发 ——
+	 * 硬塞一个假的输入标签进去只会让配置表变得莫名其妙。
+	 *
+	 * 授予后如果该能力标记了 bActivateOnGranted，会立刻激活并一直保持激活。
+	 */
+	bool GivePassiveAbility(TSubclassOf<UGameplayAbility> AbilityClass, int32 Level = 1);
+
+	/**
 	 * 按输入标签尝试激活能力。
 	 *
 	 * 这是 PlayerController 和 AI 共用的入口——两边都走同一条路径，

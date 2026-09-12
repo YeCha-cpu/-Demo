@@ -289,6 +289,27 @@ void URPG_GameplayAbilityBase::ConsumeStamina(float Amount)
 
 	ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
 
+	// ══════════════════════════════════════════════════════════════════
+	//  刷新"恢复阻断"
+	// ══════════════════════════════════════════════════════════════════
+	// 每消耗一次耐力就重新挂一次阻断 GE。因为它是"刷新持续时间"式的堆叠，
+	// 连续消耗会把阻断时间不断往后推 —— 这正是我们想要的：
+	// 只要玩家还在动作，耐力就不会恢复。
+	//
+	// 恢复侧（GE_StaminaRegen）通过 OngoingTagRequirements 检查
+	// State.Stamina.Blocked 来决定是否生效，所以这条链路里
+	// **没有任何计时代码** —— 时间纯粹由 GE 的 Duration 表达。
+	if (StaminaRegenDelayEffectClass)
+	{
+		const FGameplayEffectSpecHandle DelaySpecHandle =
+			ASC->MakeOutgoingSpec(StaminaRegenDelayEffectClass, GetAbilityLevel(), Context);
+
+		if (DelaySpecHandle.IsValid())
+		{
+			ASC->ApplyGameplayEffectSpecToSelf(*DelaySpecHandle.Data.Get());
+		}
+	}
+
 	UE_LOG(LogRPG_Combat, Verbose,
 		TEXT("[%s] 消耗耐力 %.1f"), *GetNameSafe(GetAvatarActorFromActorInfo()), Amount);
 }

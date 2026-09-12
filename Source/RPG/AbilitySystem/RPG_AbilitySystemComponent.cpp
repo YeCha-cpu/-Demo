@@ -106,6 +106,55 @@ bool URPG_AbilitySystemComponent::RegisterInputAbility(
 
 	UE_LOG(LogRPG_Ability, Log, TEXT("注册输入能力：%s → %s"), *InputTag.ToString(), *AbilityClass->GetName());
 
+	// ── 被动能力：授予后立刻激活 ──
+	// 耐力恢复这类常驻能力没有输入触发，必须在这里主动拉起。
+	// 激活后它们会一直保持激活（GA 内部不调 EndAbility），靠持续挂着的 GE 起作用。
+	if (const URPG_GameplayAbilityBase* AbilityCDO =
+			AbilityClass->GetDefaultObject<URPG_GameplayAbilityBase>())
+	{
+		if (AbilityCDO->ShouldActivateOnGranted())
+		{
+			TryActivateAbility(Handle);
+
+			UE_LOG(LogRPG_Ability, Log, TEXT("  └─ 该能力标记为「授予即激活」，已自动激活"));
+		}
+	}
+
+	return true;
+}
+
+bool URPG_AbilitySystemComponent::GivePassiveAbility(TSubclassOf<UGameplayAbility> AbilityClass, int32 Level)
+{
+	if (!AbilityClass)
+	{
+		UE_LOG(LogRPG_Ability, Warning, TEXT("GivePassiveAbility 失败：没有指定能力类"));
+		return false;
+	}
+
+	const FGameplayAbilitySpec NewSpec(AbilityClass, Level);
+	const FGameplayAbilitySpecHandle Handle = GiveAbility(NewSpec);
+
+	if (!Handle.IsValid())
+	{
+		UE_LOG(LogRPG_Ability, Error, TEXT("GivePassiveAbility 失败：授予 %s 未成功"),
+			*AbilityClass->GetName());
+		return false;
+	}
+
+	UE_LOG(LogRPG_Ability, Log, TEXT("注册被动能力：%s"), *AbilityClass->GetName());
+
+	// 被动能力通常需要立刻生效（耐力恢复从角色一出生就该工作）
+	if (const URPG_GameplayAbilityBase* AbilityCDO =
+			AbilityClass->GetDefaultObject<URPG_GameplayAbilityBase>())
+	{
+		if (AbilityCDO->ShouldActivateOnGranted())
+		{
+			TryActivateAbility(Handle);
+
+			UE_LOG(LogRPG_Ability, Log, TEXT("  └─ 已自动激活"));
+		}
+	}
+
 	return true;
 }
 

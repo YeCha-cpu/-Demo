@@ -150,6 +150,12 @@ void ARPG_Player::InitializeAbilitySystem()
 	if (URPG_AbilitySystemComponent* RPGASC = Cast<URPG_AbilitySystemComponent>(ASC))
 	{
 		RPGASC->RegisterInputAbilities(StartupAbilities);
+
+		// 被动能力（耐力恢复等）没有输入标签，走单独的入口授予
+		for (const TSubclassOf<UGameplayAbility>& PassiveClass : StartupPassiveAbilities)
+		{
+			RPGASC->GivePassiveAbility(PassiveClass);
+		}
 	}
 	else
 	{

@@ -66,6 +66,17 @@ public:
 	 */
 	virtual void OnInputReleased() {}
 
+	/**
+	 * 是否在授予时自动激活（被动能力用）。
+	 *
+	 * 供 URPG_AbilitySystemComponent 在 GiveAbility 之后判断要不要立即拉起。
+	 * 用 getter 而不是把 bActivateOnGranted 直接公开，是为了保持
+	 * "配置只能由子类和编辑器改、外部只读"的边界 —— 否则任何代码都能
+	 * 在运行时把某个能力改成被动，那会很难排查。
+	 */
+	UFUNCTION(BlueprintPure, Category = "RPG|Ability")
+	bool ShouldActivateOnGranted() const { return bActivateOnGranted; }
+
 	// ══════════════════════════════════════════════════════════════════
 	//  便捷查询
 	// ══════════════════════════════════════════════════════════════════
@@ -158,4 +169,35 @@ protected:
 	/** 耐力消耗 GE（Instant，SetByCaller 传消耗量） */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RPG|Effects")
 	TSubclassOf<UGameplayEffect> StaminaCostEffectClass;
+
+	/**
+	 * 耐力恢复阻断 GE（Duration）。
+	 *
+	 * 每次消耗耐力后重新挂一次，**它的持续时间就是"停手多久才开始恢复"**。
+	 * 恢复用的 GE_StaminaRegen 通过 OngoingTagRequirements 检查它授予的
+	 * State.Stamina.Blocked 标签来决定是否生效。
+	 *
+	 * 于是"停手 3 秒后缓慢恢复"这条规则**完全由标签驱动**：
+	 * 不需要 Tick、不需要计时器、不需要一行判断代码。
+	 * 而且联机下天然正确 —— 标签会复制，进度条在两端表现一致。
+	 *
+	 * ⚠️ 这个 GE 需要配成"每次应用刷新持续时间"（Stacking 相关设置），
+	 * 否则连续消耗时阻断时间不会延长。
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RPG|Effects")
+	TSubclassOf<UGameplayEffect> StaminaRegenDelayEffectClass;
+
+	// ══════════════════════════════════════════════════════════════════
+	//  被动能力
+	// ══════════════════════════════════════════════════════════════════
+
+	/**
+	 * 授予后立刻自动激活。
+	 *
+	 * 用于耐力恢复这类**常驻被动能力** —— 它们没有输入触发，需要在角色
+	 * 初始化时就开始工作。激活后会一直保持激活状态（GA 内部不调 EndAbility），
+	 * 直到角色死亡或能力被强制结束。
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RPG|Ability")
+	bool bActivateOnGranted = false;
 };

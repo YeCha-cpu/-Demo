@@ -106,5 +106,11 @@ void ARPG_Enemy::InitializeAbilitySystem()
 	// 敌人用与玩家完全相同的映射机制，只是触发者会是 AI 而不是按键。
 	AbilitySystemComponent->RegisterInputAbilities(StartupAbilities);
 
+	// 被动能力同样要授予 —— 敌人也需要耐力恢复
+	for (const TSubclassOf<UGameplayAbility>& PassiveClass : StartupPassiveAbilities)
+	{
+		AbilitySystemComponent->GivePassiveAbility(PassiveClass);
+	}
+
 	bAbilitySystemInitialized = true;
 }

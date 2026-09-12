@@ -181,6 +181,16 @@ protected:
 	TMap<FGameplayTag, TSubclassOf<UGameplayAbility>> StartupAbilities;
 
 	/**
+	 * 起始被动能力（没有输入触发，授予后自动激活并常驻）。
+	 *
+	 * 典型成员：GA_StaminaRegen（耐力恢复）。
+	 * 它们不出现在 StartupAbilities 里，因为那张表是"输入标签 → 能力"的映射，
+	 * 而被动能力没有任何输入可以映射。
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RPG|Abilities")
+	TArray<TSubclassOf<UGameplayAbility>> StartupPassiveAbilities;
+
+	/**
 	 * 初始属性 GE。角色初始化时应用一次，用来设定生命/攻击/防御等数值。
 	 * 放在 GE 而不是 C++ 构造函数里，是为了让数值可以被策划直接调整而不必重新编译。
 	 */

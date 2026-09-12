@@ -36,6 +36,17 @@ URPG_GA_LightAttack::URPG_GA_LightAttack()
 	// 索引在起手那一瞬间是 0（表示"正在打第 1 段"），无法区分
 	// "不在连段中"和"正在打第 1 段"。标签才精确表达"某个能力此刻正在激活"。
 	ActivationOwnedTags.AddTag(RPGTags::Ability_Attack_Light);
+
+	// ══════════════════════════════════════════════════════════════════
+	//  激活时取消重击（包括蓄力中）
+	// ══════════════════════════════════════════════════════════════════
+	// GA_HeavyAttack 声明了"激活时取消轻击"（那是切手技的机制），
+	// 但反过来没有 —— 结果就是蓄力期间按左键，两个 GA 会**并行跑**：
+	// 各自播各自的蒙太奇、各扣各的耐力，表现上是一团乱。
+	//
+	// 补上这个方向，让"轻击打断蓄力"也成立。这是动作游戏里的常见规则：
+	// 蓄力不是不可打断的霸体状态，玩家随时可以改用轻击。
+	CancelAbilitiesWithTag.AddTag(RPGTags::Ability_Attack_Heavy);
 }
 
 void URPG_GA_LightAttack::ActivateAbility(
@@ -119,8 +130,19 @@ void URPG_GA_LightAttack::EndAbility(
 	bool bReplicateEndAbility,
 	bool bWasCancelled)
 {
-	// 统一在这里清理，避免每条结束路径都要记得清一遍。
-	// （Task 会随能力结束自动销毁，但显式 EndTask 能让行为更可预测。）
+	// ⚠️ 连段索引必须在这里也重置一次。
+	//
+	// FinishCombo() 里虽然已经重置过，但**被外部取消**这条路径不走 FinishCombo ——
+	// 比如切手技通过 CancelAbilitiesWithTag 取消轻击时，GAS 直接调 EndAbility。
+	// 少了这一句，连段索引会残留，下次按左键会从中间某段开始
+	//（症状是"打着打着突然从第 3 段起手"）。
+	//
+	// ResetCombo 内部有"值没变就跳过"的判断，所以重复调用是安全的。
+	if (URPG_CombatComponent* Combat = GetCombatComponent())
+	{
+		Combat->ResetCombo();
+	}
+
 	if (TraceTask)
 	{
 		TraceTask->EndTask();
