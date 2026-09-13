@@ -75,7 +75,7 @@ bool URPG_AbilitySystemComponent::RegisterInputAbility(
 		return false;
 	}
 
-	// 重复注册同一个输入标签时，先撤销旧能力。
+	// 若重复注册同一个输入标签时，先撤销旧能力。
 	// 不这么做的话，同一个标签会挂上多个 GA 实例，激活时可能同时触发两个，很难查。
 	if (const FGameplayAbilitySpecHandle* OldHandle = InputTagToSpecHandle.Find(InputTag))
 	{
@@ -109,14 +109,13 @@ bool URPG_AbilitySystemComponent::RegisterInputAbility(
 	// ── 被动能力：授予后立刻激活 ──
 	// 耐力恢复这类常驻能力没有输入触发，必须在这里主动拉起。
 	// 激活后它们会一直保持激活（GA 内部不调 EndAbility），靠持续挂着的 GE 起作用。
-	if (const URPG_GameplayAbilityBase* AbilityCDO =
-			AbilityClass->GetDefaultObject<URPG_GameplayAbilityBase>())
+	if (const URPG_GameplayAbilityBase* AbilityCDO = AbilityClass->GetDefaultObject<URPG_GameplayAbilityBase>())
 	{
-		if (AbilityCDO->ShouldActivateOnGranted())
+		if (AbilityCDO->ShouldActivateOnGranted())	// 是否授予后立即激活
 		{
 			TryActivateAbility(Handle);
 
-			UE_LOG(LogRPG_Ability, Log, TEXT("  └─ 该能力标记为「授予即激活」，已自动激活"));
+			UE_LOG(LogRPG_Ability, Log, TEXT("  └─ 该能力标记为「授予即激活（被动技能）」，已自动激活"));
 		}
 	}
 
@@ -131,6 +130,27 @@ bool URPG_AbilitySystemComponent::GivePassiveAbility(TSubclassOf<UGameplayAbilit
 		return false;
 	}
 
+	// ══════════════════════════════════════════════════════════════════
+	//  已经授予过就跳过 ★
+	// ══════════════════════════════════════════════════════════════════
+	// 和 RegisterInputAbility 里那个守卫是同一个理由，但这里更容易踩到：
+	//
+	// 玩家的 ASC 挂在 PlayerState 上，**重生时 PlayerState 不销毁** ——
+	// 新 Pawn 的 InitializeAbilitySystem 会再跑一遍，把被动能力又授予一次。
+	// 结果就是挂了两份 GA_StaminaRegen → 耐力恢复速度翻倍，
+	// 而且它**不报错**，只是数值悄悄不对。
+	//
+	// 输入能力那边靠 InputTagToSpecHandle 这个映射表挡住了，
+	// 被动能力没有那样的表，所以直接按类查。
+	if (FindAbilitySpecFromClass(AbilityClass))
+	{
+		UE_LOG(LogRPG_Ability, Verbose,
+			TEXT("被动能力 %s 已经授予过，跳过（重生时会出现这种情况，属正常）"),
+			*AbilityClass->GetName());
+		return true;
+	}
+
+	// “2步走”创建并授予 GA 实例
 	const FGameplayAbilitySpec NewSpec(AbilityClass, Level);
 	const FGameplayAbilitySpecHandle Handle = GiveAbility(NewSpec);
 
@@ -144,18 +164,57 @@ bool URPG_AbilitySystemComponent::GivePassiveAbility(TSubclassOf<UGameplayAbilit
 	UE_LOG(LogRPG_Ability, Log, TEXT("注册被动能力：%s"), *AbilityClass->GetName());
 
 	// 被动能力通常需要立刻生效（耐力恢复从角色一出生就该工作）
-	if (const URPG_GameplayAbilityBase* AbilityCDO =
-			AbilityClass->GetDefaultObject<URPG_GameplayAbilityBase>())
+	if (const URPG_GameplayAbilityBase* AbilityCDO = AbilityClass->GetDefaultObject<URPG_GameplayAbilityBase>())
 	{
 		if (AbilityCDO->ShouldActivateOnGranted())
 		{
 			TryActivateAbility(Handle);
-
-			UE_LOG(LogRPG_Ability, Log, TEXT("  └─ 已自动激活"));
+			UE_LOG(LogRPG_Ability, Log, TEXT(" └─ %s 被动能力已自动激活"), *AbilityClass->GetName());
 		}
 	}
 
 	return true;
+}
+
+void URPG_AbilitySystemComponent::ReactivatePassiveAbilities()
+{
+	int32 ReactivatedCount = 0;
+
+	// ★ 加锁：遍历 ActivatableAbilities.Items 期间它不能被改大小。
+	//
+	// 就目前的代码路径而言（TryActivateAbility 只会 MarkAbilitySpecDirty，
+	// 不增删元素）不加锁也是安全的 —— 但"安全"是靠"恰好没有能力在激活时
+	// 授予/撤销别的能力"维持的，那是个会随时间失效的前提。
+	// GiveAbility 和 OnRemoveAbility 自己都要求持有这把锁
+	// （AbilitySystemComponent_Abilities.cpp:309 / :626），
+	// 遍历方同样持有才是对称的写法。
+	FScopedAbilityListLock AbilityListLock(*this);
+
+	// 遍历已授予的能力表，而不是角色的 StartupPassiveAbilities 配置数组 ——
+	// 后者只有角色自己知道，ASC 不该反向依赖角色。
+	// ActivatableAbilities 就是"这个 ASC 现在到底有哪些能力"的权威来源。
+	for (const FGameplayAbilitySpec& Spec : ActivatableAbilities.Items)
+	{
+		if (!Spec.Ability || Spec.IsActive())
+		{
+			continue;
+		}
+
+		// 判断依据取 CDO 上的标记 —— 它是配置，不是运行时状态。
+		const URPG_GameplayAbilityBase* AbilityCDO =
+			Cast<URPG_GameplayAbilityBase>(Spec.Ability);
+
+		if (AbilityCDO && AbilityCDO->ShouldActivateOnGranted())
+		{
+			// 用 Handle 激活而不是标记 Spec 为 dirty：
+			// TryActivateAbility 会走完整的 CanActivateAbility 检查
+			// （刚摘掉 State.Dead，所以能过），语义上更正确。
+			TryActivateAbility(Spec.Handle);
+			++ReactivatedCount;
+		}
+	}
+
+	UE_LOG(LogRPG_Ability, Log, TEXT("重生：重新激活 %d 个常驻被动能力"), ReactivatedCount);
 }
 
 void URPG_AbilitySystemComponent::RegisterInputAbilities(const TMap<FGameplayTag, TSubclassOf<UGameplayAbility>>& InMappings)
@@ -175,10 +234,6 @@ bool URPG_AbilitySystemComponent::TryActivateAbilityByInputTag(FGameplayTag Inpu
 	if (!HandlePtr || !HandlePtr->IsValid())
 	{
 		// ⚠️ 用 Warning 而不是 Verbose。
-		// 这几乎总是**配置错误**（角色的 StartupAbilities 里漏了这条），
-		// 属于"必须让开发者看到"的情况。之前用 Verbose，导致按键没反应时
-		// 日志里一片空白，完全无从下手 —— 这是日志设计的失误。
-		//
 		// 去重是为了防止玩家连打时刷屏：同一个标签只警告一次。
 		if (!WarnedInputTags.Contains(InputTag))
 		{

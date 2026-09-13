@@ -6,12 +6,7 @@
 
 void URPG_InputBuffer::Push(const FGameplayTag& InputTag, float LifeTime, float Now)
 {
-	if (!InputTag.IsValid())
-	{
-		// 无效标签直接忽略。静默处理是刻意的 —— 调用方可能传了没配置的标签，
-		// 那不是错误，只是这条输入没有意义。
-		return;
-	}
+	if (!InputTag.IsValid()) return;
 
 	// ── 容量控制：满了丢最旧的 ──
 	// 为什么丢旧而不是拒绝新？因为玩家**最新**按下的才代表当前意图。
@@ -30,10 +25,9 @@ void URPG_InputBuffer::Push(const FGameplayTag& InputTag, float LifeTime, float 
 	NewEntry.Timestamp = Now;
 	NewEntry.LifeTime = LifeTime;
 
-	Entries.Add(MoveTemp(NewEntry));
+	Entries.Add(MoveTemp(NewEntry));	// MoveTemp 会将引用转换为右值引用
 
-	UE_LOG(LogRPG_Combat, VeryVerbose,
-		TEXT("缓存输入 %s（当前缓存 %d 条）"), *InputTag.ToString(), Entries.Num());
+	UE_LOG(LogRPG_Combat, VeryVerbose, TEXT("缓存输入 %s（当前缓存 %d 条）"), *InputTag.ToString(), Entries.Num());
 }
 
 bool URPG_InputBuffer::Consume(FGameplayTag& OutTag, float Now)
@@ -88,10 +82,7 @@ void URPG_InputBuffer::PruneExpired(float Now)
 
 FString URPG_InputBuffer::ToDebugString() const
 {
-	if (Entries.IsEmpty())
-	{
-		return TEXT("(空)");
-	}
+	if (Entries.IsEmpty()) return TEXT("(空)");
 
 	TStringBuilder<256> Builder;
 	Builder.Appendf(TEXT("[%s] "), Mode == ERPG_InputBufferMode::Stack ? TEXT("栈") : TEXT("队列"));

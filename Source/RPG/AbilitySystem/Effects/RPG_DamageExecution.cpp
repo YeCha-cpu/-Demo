@@ -15,6 +15,8 @@
  * DECLARE_ATTRIBUTE_CAPTUREDEF 会生成两个成员：
  *   FProperty* AttackProperty;                          —— 属性的反射信息
  *   FGameplayEffectAttributeCaptureDefinition AttackDef; —— 捕获配置（含 Snapshot 标志）
+ *   
+ * DEFINE_ATTRIBUTE_CAPTUREDEF 则生成一个 FGameplayEffectAttributeCaptureDefinition，用于捕获属性。
  *
  * 用一个静态结构体集中管理，避免每个 Execution 实例都重建一遍。
  */
@@ -90,8 +92,7 @@ void URPG_DamageExecution::Execute_Implementation(
 	//
 	// 第三个参数是"找不到时的默认值"——传 1.0 而不是 0，
 	// 这样即使忘了传倍率也只是伤害偏低，而不是完全没伤害（后者更难排查）。
-	const float Multiplier = Spec.GetSetByCallerMagnitude(
-		RPGTags::Data_Damage_Multiplier, /*WarnIfNotFound*/ false, /*DefaultIfNotFound*/ 1.f);
+	const float Multiplier = Spec.GetSetByCallerMagnitude(RPGTags::Data_Damage_Multiplier, /*WarnIfNotFound*/ false, /*DefaultIfNotFound*/ 1.f);
 
 	const float BaseDamage = Attack * FMath::Max(Multiplier, 0.f);
 
@@ -105,6 +106,7 @@ void URPG_DamageExecution::Execute_Implementation(
 	//     K 就是"减伤 50% 所需的防御值"
 	const float Mitigation = Defense / (Defense + URPG_AttributeSet::DefenseConstant);
 
+	// 【最终伤害】 = 基础伤害 × (1 - 减伤)
 	float FinalDamage = BaseDamage * (1.f - Mitigation);
 
 	// 保底伤害：避免高防目标把伤害压到 0 导致"打不动"

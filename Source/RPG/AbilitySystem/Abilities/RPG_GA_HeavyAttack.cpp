@@ -197,6 +197,19 @@ void URPG_GA_HeavyAttack::StartTransition()
 	CurrentDamageMultiplier = Module->ComboTransitionMultiplier;
 	ConsumeStamina(Module->ComboTransitionStaminaCost);
 
+	// 挂上"切手技进行中"标签。
+	// 走的是和蓄力标签同一套机制（loose tag + CountToOwner 复制），
+	// 理由也一样：这是**公共状态**，不是本能力的私有成员 ——
+	// HUD 要显示招式名、动画蓝图将来可能要单独处理切手技的收招姿势。
+	// 摘除在 ClearChargeTags() 里一并做，保证"挂上的地方"和"摘掉的地方"成对。
+	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
+	{
+		ASC->AddLooseGameplayTags(
+			FGameplayTagContainer(RPGTags::State_Attack_Transition),
+			/*Count=*/1,
+			EGameplayTagReplicationState::CountToOwner);
+	}
+
 	UE_LOG(LogRPG_Combat, Log, TEXT("[%s] 切手技（倍率 %.2f，耐力 %.1f）"),
 		*GetNameSafe(GetAvatarActorFromActorInfo()),
 		Module->ComboTransitionMultiplier, Module->ComboTransitionStaminaCost);
@@ -462,6 +475,22 @@ void URPG_GA_HeavyAttack::UpdateChargeTags(int32 NewLevel)
 
 void URPG_GA_HeavyAttack::ClearChargeTags()
 {
+	// ── 切手技标签 ──
+	// ⚠️ 必须在下面那个提前返回**之前**摘。
+	// 切手技分支从来不碰 ActiveChargeTags，所以走到这里时它一定是空的 ——
+	// 把这段放到判空之后，切手技的标签就永远摘不掉，
+	// 角色的"招式名"会一直卡在"切手技"上。
+	//
+	// 用 RemoveLooseGameplayTags 而不是 RemoveLooseGameplayTag：
+	// 前者可以整批操作，也方便将来往这个集合里加标签。
+	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo())
+	{
+		ASC->RemoveLooseGameplayTags(
+			FGameplayTagContainer(RPGTags::State_Attack_Transition),
+			/*Count=*/1,
+			EGameplayTagReplicationState::CountToOwner);
+	}
+
 	// 先判空再取 ASC —— 绝大多数调用发生在"没挂过标签"的情况下
 	// （比如直接走切手技分支），提前返回省掉一次组件查找。
 	if (ActiveChargeTags.IsEmpty())

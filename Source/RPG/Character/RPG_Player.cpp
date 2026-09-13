@@ -3,6 +3,9 @@
 #include "Character/RPG_Player.h"
 
 #include "AbilitySystemComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/Controller.h"
+#include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerState.h"
 
 #include "AbilitySystem/RPG_AbilitySystemComponent.h"
@@ -20,7 +23,7 @@ void ARPG_Player::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 兜底尝试。若 PossessedBy 已经成功初始化过，这里是空操作。
+	// 兜底尝试：若 PossessedBy 已经成功初始化过，这里是空操作。
 	InitializeAbilitySystem();
 }
 
@@ -41,6 +44,72 @@ void ARPG_Player::OnRep_PlayerState()
 	// 单机下这个函数不会被调用，但写上它几乎没有成本，
 	// 而一旦将来接入联机，少了它就是"客户端技能全失效"级别的 bug。
 	InitializeAbilitySystem();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  重生
+// ══════════════════════════════════════════════════════════════════════
+
+FTransform ARPG_Player::GetRespawnTransform() const
+{
+	// GetAuthGameMode 只在服务器返回非空 —— 而重生本来就只在服务器跑
+	// （PerformRespawn 有 HasAuthority 判断），所以这里不需要再判一次。
+	if (UWorld* World = GetWorld())
+	{
+		if (AGameModeBase* GameMode = World->GetAuthGameMode<AGameModeBase>())
+		{
+			if (AActor* PlayerStart = GameMode->FindPlayerStart(GetController()))
+			{
+				return PlayerStart->GetActorTransform();
+			}
+		}
+	}
+
+	// 没有 GameMode 的场合（比如直接拖一个 Player 进空关卡做单点测试）
+	// 回落到基类的出生变换 —— 有兜底总比传送回世界原点强。
+	UE_LOG(LogRPG_Combat, Warning,
+		TEXT("[%s] 拿不到 PlayerStart，重生回出生位置"), *GetName());
+
+	return Super::GetRespawnTransform();
+}
+
+void ARPG_Player::OnRespawned()
+{
+	Super::OnRespawned();
+
+	AController* Ctrl = GetController();
+	if (!Ctrl)
+	{
+		return;
+	}
+
+	// ══════════════════════════════════════════════════════════════════
+	//  ★ 位置和视角都必须**显式推给拥有这个角色的客户端**
+	// ══════════════════════════════════════════════════════════════════
+	// 本地控制的角色在客户端是 **AutonomousProxy**，它由客户端预测驱动，
+	// 服务器只负责纠偏。这意味着下面两样东西**都不会自动同步过去**：
+	//
+	//   ① 位置 —— `AActor::ReplicatedMovement` 的复制条件是
+	//      **COND_SimulatedOnly**，根本不会发给 AutonomousProxy。
+	//      走的是"客户端发 ServerMove → 服务器发现对不上 → ClientAdjustPosition"。
+	//      服务器传送完，客户端要等下一次移动纠偏才知道。
+	//      玩家站着不动时这个延迟尤其明显 —— 表现是"复活后还站在死亡地点，
+	//      过一会儿才被拽回出生点"。
+	//
+	//   ② 视角 —— `AController::ControlRotation` **压根不是复制属性**
+	//      （Controller.cpp:826-835 只注册了 PlayerState 和 Pawn）。
+	//      服务器调 SetControlRotation 只改到自己那份，
+	//      引擎给客户端送视角走的是 ClientSetRotation 这个 RPC
+	//      （Controller.cpp:469-476）。
+	//
+	// ClientSetLocation 一次解决两件事（它的实现就是 ClientSetRotation + TeleportTo，
+	// Controller.cpp:455-462）。引擎自己的 RestartPlayerAtTransform 走的是同一条思路
+	// ——它干脆换一个新 Pawn 靠占有复制来解决；我们复用 Pawn，所以要显式推一次。
+	//
+	// 服务器侧的 SetControlRotation 仍然要调：主机自己的玩家就在这台机器上，
+	// 他的视角是真需要改的。
+	Ctrl->SetControlRotation(GetActorRotation());
+	Ctrl->ClientSetLocation(GetActorLocation(), GetActorRotation());
 }
 
 UAbilitySystemComponent* ARPG_Player::GetASCInternal() const
@@ -108,7 +177,7 @@ void ARPG_Player::InitializeAbilitySystem()
 	if (!HasAuthority())
 	{
 		bAbilitySystemInitialized = true;
-		return;
+		return;	// 客户端就此返回
 	}
 
 	// ══════════════════════════════════════════════════════════════════
@@ -118,22 +187,20 @@ void ARPG_Player::InitializeAbilitySystem()
 	// 因为能力激活时往往会读属性（比如耐力够不够），属性没就位会读到 0。
 	if (InitAttributesEffect)
 	{
+		// “4步走”：创建并应用初始属性的 GameplayEffect
 		FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
 		Context.AddSourceObject(this);
-
-		const FGameplayEffectSpecHandle SpecHandle =
-			ASC->MakeOutgoingSpec(InitAttributesEffect, 1.f, Context);
-
+		const FGameplayEffectSpecHandle SpecHandle = ASC->MakeOutgoingSpec(InitAttributesEffect, 1.f, Context);
+		// SpecHandle.Data.Get()->SetSetByCallerMagnitude( "InitAttributesEffectTag", 1.f );
+		
 		if (SpecHandle.IsValid())
 		{
 			ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-			UE_LOG(LogRPG_Ability, Log, TEXT("[%s] 已应用初始属性：%s"),
-				*GetName(), *InitAttributesEffect->GetName());
+			UE_LOG(LogRPG_Ability, Log, TEXT("[%s] 已应用初始属性：%s"), *GetName(),*InitAttributesEffect->GetName());
 		}
 		else
 		{
-			UE_LOG(LogRPG_Ability, Error, TEXT("[%s] 初始属性 GE 的 Spec 创建失败：%s"),
-				*GetName(), *InitAttributesEffect->GetName());
+			UE_LOG(LogRPG_Ability, Error, TEXT("[%s] 初始属性 GE 的 Spec 创建失败：%s"),*GetName(), *InitAttributesEffect->GetName());
 		}
 	}
 	else
@@ -149,7 +216,7 @@ void ARPG_Player::InitializeAbilitySystem()
 	// ══════════════════════════════════════════════════════════════════
 	if (URPG_AbilitySystemComponent* RPGASC = Cast<URPG_AbilitySystemComponent>(ASC))
 	{
-		RPGASC->RegisterInputAbilities(StartupAbilities);
+		RPGASC->RegisterInputAbilities(StartupAbilities);	// 批量授予能力
 
 		// 被动能力（耐力恢复等）没有输入标签，走单独的入口授予
 		for (const TSubclassOf<UGameplayAbility>& PassiveClass : StartupPassiveAbilities)

@@ -112,10 +112,14 @@ protected:
 	/**
 	 * 播放蒙太奇并返回 Task，调用方负责绑定委托并 ReadyForActivation。
 	 *
+	 * @param Rate 播放速率。1 = 原速，<1 放慢，>1 快放。
+	 *             默认 1，所以攻击类调用点不用改。
+	 *             受击/死亡蒙太奇会用角色上配的速率（见 RPG_BaseCharacter）。
+	 *
 	 * @return 蒙太奇为空时返回 nullptr（此时调用方应跳过动画相关逻辑，
 	 *         但继续执行数值逻辑）
 	 */
-	UAbilityTask_PlayMontageAndWait* PlayMontageOrSkip(UAnimMontage* Montage, FName TaskName);
+	UAbilityTask_PlayMontageAndWait* PlayMontageOrSkip(UAnimMontage* Montage, FName TaskName, float Rate = 1.f);
 
 	/**
 	 * 对目标施加伤害。

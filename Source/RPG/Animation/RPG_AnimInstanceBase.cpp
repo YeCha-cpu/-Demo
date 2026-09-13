@@ -148,12 +148,33 @@ void URPG_AnimInstanceBase::UpdateLocomotion(float /*DeltaSeconds*/)
 	{
 		MovementState = ERPG_MovementState::Crouching;
 	}
-	else if (bIsSprinting)
+	else if (bIsSprinting && Speed > IdleSpeedThreshold)
 	{
-		// ★ 用标签判定，而不是 Speed > 某个阈值。
-		// 阈值法在"从冲刺减速回走路"的过程中会来回抖动：
-		// 速度跨过阈值 → 切回走路 → 速度又因为还没降下来而超阈值 → 又切回冲刺。
-		// 标签是离散的，从按下到松开只有一次跳变，不会抖。
+		// ══════════════════════════════════════════════════════════════
+		//  ★ 标签**且**真的在动，两个条件都要
+		// ══════════════════════════════════════════════════════════════
+		// 光看标签会出一个很显眼的问题：
+		//
+		//   State.Sprinting 在"冲刺/追击期间"是**常驻**的，人站着不动它也在。
+		//   这时 MovementState 会是 Sprinting → 动画蓝图用「跑步」那条状态机
+		//   → 那条状态机的混合空间拿 SpeedRatio 当横轴，而站着时 SpeedRatio = 0
+		//   → 播的是混合空间**最慢的那个采样点**（通常是走路）
+		//   → 表现就是**原地踏步**。
+		//
+		// 两个具体症状（同一个根因）：
+		//   · 敌人攻击后站在 Wait 里 → 走两步
+		//   · 玩家站着按 Shift → 进入"行走"，松开才回 idle
+		//
+		// 补上速度判断就好了：站着不动就该待在 Grounded 分支，
+		// 那条状态机里才有 Idle。
+		//
+		// 为什么阈值用 IdleSpeedThreshold（而不是另设一个大的）：
+		// 它表达的是"算不算停下来了"，和速度归零的判断用同一把尺子，
+		// 免得出现"动画说没停、但 SpeedRatio 已经是 0"这种前后不一致。
+		//
+		// 至于"会不会因为阈值抖动"——不会：
+		//   进入跑步仍然由**标签**决定（离散事件，按 Shift 才跳变），
+		//   速度条件只负责"停下来时退出"这一个方向。
 		MovementState = ERPG_MovementState::Sprinting;
 	}
 	else
@@ -169,10 +190,7 @@ void URPG_AnimInstanceBase::UpdateLocomotion(float /*DeltaSeconds*/)
 void URPG_AnimInstanceBase::UpdateCombatState()
 {
 	ARPG_BaseCharacter* Character = OwnerCharacter.Get();
-	if (!Character)
-	{
-		return;
-	}
+	if (!Character) return;
 
 	// ══════════════════════════════════════════════════════════════════
 	//  每帧重新取 ASC，不做缓存

@@ -69,6 +69,25 @@ protected:
 	virtual void BeginPlay() override;
 	virtual UAbilitySystemComponent* GetASCInternal() const override;
 
+	// ══════════════════════════════════════════════════════════════════
+	//  死亡 / 重生的 AI 挂钩
+	// ══════════════════════════════════════════════════════════════════
+
+	/**
+	 * 死亡时停掉 AI。
+	 *
+	 * 为什么这件事必须由敌人的代码来做，而不是让行为树自己发现：
+	 * 行为树没有"我死了"这个概念 —— 不主动停，它会一直写黑板、发起寻路、
+	 * 尝试激活攻击能力。而那时移动模式已被布娃娃关掉，寻路每次都失败，
+	 * 行为树会卡在一个永不结束的 Latent Task 上。
+	 *
+	 * 这两个函数由 GA_Death 通过基类的钩子调用，只在服务器发生。
+	 */
+	virtual void OnDeathStarted() override;
+
+	/** 重生时重启 AI。只停不重启的话，敌人复活后会站着不动，且不报错。 */
+	virtual void OnRespawned() override;
+
 	/** 初始化 ASC 关联、属性与能力（幂等） */
 	void InitializeAbilitySystem();
 

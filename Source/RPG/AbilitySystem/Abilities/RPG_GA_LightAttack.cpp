@@ -348,10 +348,8 @@ void URPG_GA_LightAttack::DetachCurrentSegmentMontageTask()
 	// 连段期间能力当然一直激活着 —— 所以旧任务哪怕已经结束，
 	// 它的 OnCompleted 照样会把我们喊醒。
 	// 摘掉绑定是唯一不依赖引擎内部状态判断的做法。
-	CurrentSegmentMontageTask->OnCompleted.RemoveDynamic(
-		this, &URPG_GA_LightAttack::OnMontageCompleted);
-	CurrentSegmentMontageTask->OnInterrupted.RemoveDynamic(
-		this, &URPG_GA_LightAttack::OnMontageInterrupted);
+	CurrentSegmentMontageTask->OnCompleted.RemoveDynamic(this, &URPG_GA_LightAttack::OnMontageCompleted);
+	CurrentSegmentMontageTask->OnInterrupted.RemoveDynamic(this, &URPG_GA_LightAttack::OnMontageInterrupted);
 
 	CurrentSegmentMontageTask->EndTask();
 	CurrentSegmentMontageTask = nullptr;
@@ -435,16 +433,10 @@ bool URPG_GA_LightAttack::TryStartNextSegment()
 	URPG_CombatComponent* Combat = GetCombatComponent();
 	URPG_AttackModuleData* Module = GetAttackModule();
 
-	if (!Combat || !Module)
-	{
-		return false;
-	}
+	if (!Combat || !Module) return false;
 
 	FGameplayTag BufferedTag;
-	if (!Combat->ConsumeInputTag(BufferedTag))
-	{
-		return false;
-	}
+	if (!Combat->ConsumeInputTag(BufferedTag)) return false;
 
 	// 缓存里可能存的是**别的意图**（玩家在攻击后摇里按了闪避）。
 	// 那种情况不该由轻击 GA 处理 —— 放回缓存让对应的能力去取。
@@ -603,16 +595,10 @@ void URPG_GA_LightAttack::PerformSimulatedHit()
 void URPG_GA_LightAttack::OnAttackWindowOpen(FGameplayEventData Payload)
 {
 	// 迟到事件：上一段被停掉的蒙太奇补发的 —— 忽略，见 IsEventFromCurrentSegment
-	if (!IsEventFromCurrentSegment(Payload))
-	{
-		return;
-	}
+	if (!IsEventFromCurrentSegment(Payload)) return;
 
 	URPG_AttackModuleData* Module = GetAttackModule();
-	if (!Module)
-	{
-		return;
-	}
+	if (!Module) return;
 
 	// ── 默认用模组的检测配置 ──
 	ERPG_TraceSource Source = Module->TraceSource;
@@ -621,8 +607,7 @@ void URPG_GA_LightAttack::OnAttackWindowOpen(FGameplayEventData Payload)
 	FName SocketEnd = Module->RightHandSocket;
 
 	// ── Notify 上如果配了覆盖，就用覆盖值 ──
-	if (const URPG_AttackWindowPayload* WindowPayload =
-			Cast<URPG_AttackWindowPayload>(Payload.OptionalObject.Get()))
+	if (const URPG_AttackWindowPayload* WindowPayload = Cast<URPG_AttackWindowPayload>(Payload.OptionalObject.Get()))
 	{
 		if (WindowPayload->bOverrideTrace)
 		{
@@ -674,10 +659,7 @@ void URPG_GA_LightAttack::OnAttackWindowClose(FGameplayEventData Payload)
 	// ★ 这一条尤其重要：上一段的"判定窗口关闭"会在下一段刚播起来时到达，
 	// 不过滤的话会把下一段刚开起来的轨迹检测任务直接掐掉 ——
 	// 症状是"连招里后面几段打不到人"，而且看起来像判定窗口配错了。
-	if (!IsEventFromCurrentSegment(Payload))
-	{
-		return;
-	}
+	if (!IsEventFromCurrentSegment(Payload)) return;
 
 	if (TraceTask)
 	{
@@ -689,10 +671,7 @@ void URPG_GA_LightAttack::OnAttackWindowClose(FGameplayEventData Payload)
 void URPG_GA_LightAttack::OnComboWindowOpen(FGameplayEventData Payload)
 {
 	// 迟到事件过滤 —— 见 IsEventFromCurrentSegment
-	if (!IsEventFromCurrentSegment(Payload))
-	{
-		return;
-	}
+	if (!IsEventFromCurrentSegment(Payload)) return;
 
 	bComboWindowOpen = true;
 
@@ -709,17 +688,11 @@ void URPG_GA_LightAttack::OnComboWindowClose(FGameplayEventData Payload)
 	// ★ 这条是"跳段"的元凶：上一段被停掉时引擎补发的「衔接窗口关闭」
 	// 会在接上下一段后一帧到达。不过滤的话它会把缓存里的下一次按键吃掉，
 	// 凭空多接一段 —— 表现为快速连打时跳段。
-	if (!IsEventFromCurrentSegment(Payload))
-	{
-		return;
-	}
+	if (!IsEventFromCurrentSegment(Payload)) return;
 
 	bComboWindowOpen = false;
 
-	if (TryStartNextSegment())
-	{
-		return;
-	}
+	if (TryStartNextSegment()) return;
 
 	// ── 没有可续的段 ──
 	// 这里**不结束能力** —— 动画还在播后摇，玩家可能还要做别的操作。

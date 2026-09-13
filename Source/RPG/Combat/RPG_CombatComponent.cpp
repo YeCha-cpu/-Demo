@@ -49,12 +49,7 @@ void URPG_CombatComponent::BeginPlay()
 
 void URPG_CombatComponent::PushInputTag(FGameplayTag InputTag)
 {
-	if (!InputBuffer)
-	{
-		// BeginPlay 之前调用会走到这里。静默返回而不是报错——
-		// 早期调用是时序问题不是配置问题，报错反而会误导。
-		return;
-	}
+	if (!InputBuffer) return;
 
 	InputBuffer->Push(InputTag, InputLifeTime, GetNow());
 }
@@ -83,10 +78,7 @@ void URPG_CombatComponent::ClearInputBuffer()
 
 void URPG_CombatComponent::SetComboIndex(int32 NewIndex)
 {
-	if (ComboIndex == NewIndex)
-	{
-		return;
-	}
+	if (ComboIndex == NewIndex) return;
 
 	UE_LOG(LogRPG_Combat, Verbose, TEXT("[%s] 连段索引 %d → %d"),
 		*GetNameSafe(GetOwner()), ComboIndex, NewIndex);

@@ -3,7 +3,7 @@
 #include "Core/RPG_GameplayTags.h"
 
 /**
- * 原生 GameplayTag 的实际定义。
+ * 原生 GameplayTag 的实际定义:
  *
  * 这些变量在模块加载时自动向 GameplayTag 表注册（通过 FNativeGameplayTag 的构造函数），
  * 所以不需要在 Config/DefaultGameplayTags.ini 里重复声明。
@@ -31,6 +31,7 @@ namespace RPGTags
 	// ══════════════════════════════════════════════════════════════════
 	//  Ability
 	// ══════════════════════════════════════════════════════════════════
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Attack,        "Ability.Attack",        "攻击类能力的父标签（只用作取消组，不挂任何能力）");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Attack_Light, "Ability.Attack.Light", "轻击能力（5 段连段）");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Attack_Light_01, "Ability.Attack.Light.01", "轻击能力（5 段连段）01");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Attack_Light_02, "Ability.Attack.Light.02", "轻击能力（5 段连段）02");
@@ -61,6 +62,7 @@ namespace RPGTags
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(State_Attack_Charging_Lv1,"State.Attack.Charging.Lv1", "蓄力一段");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(State_Attack_Charging_Lv2,"State.Attack.Charging.Lv2", "蓄力二段");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(State_Attack_Charging_Lv3,"State.Attack.Charging.Lv3", "蓄力三段");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(State_Attack_Transition,  "State.Attack.Transition",   "切手技进行中（轻击连段中按右键切入）");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(State_Dodging,            "State.Dodging",             "闪避中");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(State_Invulnerable,       "State.Invulnerable",        "无敌帧中");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(State_Sprinting,          "State.Sprinting",           "奔跑中");

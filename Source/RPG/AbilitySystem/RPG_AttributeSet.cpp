@@ -5,6 +5,7 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "GameplayEffectExtension.h"
 #include "Net/UnrealNetwork.h"
+#include "Character/RPG_BaseCharacter.h"
 #include "Core/RPG_GameplayTags.h"
 #include "Core/RPG_LogChannels.h"
 
@@ -127,21 +128,123 @@ void URPG_AttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallba
 
 	UE_LOG(LogRPG_Combat, Log, TEXT("[%s] 受到 %.1f 点伤害：%.0f → %.0f"), *GetNameSafe(OwningActor), LocalDamage, OldHealth, NewHealth);
 
-	// ── 死亡判定 ──
-	// 用 OldHealth > 0 做前置条件，保证"从活到死"这个跨越只触发一次。
-	// 否则若同一帧有多个伤害源结算，会重复广播死亡事件。
-	if (NewHealth <= 0.f && OldHealth > 0.f)
+	// ══════════════════════════════════════════════════════════════════
+	//  ★ 已经死了就不再广播任何事件
+	// ══════════════════════════════════════════════════════════════════
+	// 尸体是会被继续砍到的：连段的后几刀、范围伤害、别的敌人的攻击……
+	// 而这时候血量已经是 0，下面两条分支会走到"受击"那一条（因为
+	// 死亡判定的条件是"从有血变成没血"，这次不满足）。
+	//
+	// 后果是：每一刀都广播一次 Event.Combat.Hit → GA_HitReact 尝试激活
+	// → 被 ActivationBlockedTags 里的 State.Dead 挡住 → 引擎通过
+	// AbilityFailedCallbacks 报一条 Warning（见 URPG_AbilitySystemComponent）。
+	// 表现是**打尸体时日志刷屏**，而且会掩盖真正有用的告警。
+	//
+	// 从语义上讲这也更对："受击"是活人才有的反应。
+	if (OldHealth <= 0.f)
 	{
-		UE_LOG(LogRPG_Combat, Log, TEXT("[%s] 生命归零，广播死亡事件"), *GetNameSafe(OwningActor));
+		return;
+	}
 
-		// 用 GameplayEvent 而不是直接调用死亡逻辑——保持"表现层不做逻辑"的分层原则：
-		// 死亡的表现（蒙太奇、掉落、AI 停止）由 GA_Death 去处理，属性集只管广播事实。
+	// ══════════════════════════════════════════════════════════════════
+	//  ⚠️ 下面两个事件**只在服务器广播** ★
+	// ══════════════════════════════════════════════════════════════════
+	// 属性值的修改本身是预测的：本地控制的角色在自己的客户端上会跑一遍
+	// 这个函数（PredictivelyExecuteEffectSpec，GameplayEffect.cpp:3069），
+	// 然后由 GAS 在预测失败时回滚。
+	//
+	// 但**事件广播不会回滚** —— 委托一旦发出去就收不回来了。
+	// 如果不做这道判断，联机下会变成：
+	//   · 客户端本地预测"我被打死了" → 播死亡蒙太奇、进布娃娃
+	//   · 服务器说"没死" → 回滚血量，但人已经躺下了
+	//   · 服务器后来真的判死 → 再躺一次
+	// 表现是"死亡/受击表现偶尔闪一下或播两遍"，而且只在延迟高的客户端上出现，
+	// 非常难查。
+	//
+	// 所以定下规矩：**属性集只负责广播事实，广播的公信力由服务器垄断。**
+	// 客户端要知道发生了什么，靠复制（属性、标签、蒙太奇都是复制的），
+	// 而不是靠自己也广播一遍。
+	//
+	// 单机（Standalone）下 HasAuthority() 恒为 true，这条判断不产生任何影响。
+	const bool bAuthority = OwningActor && OwningActor->HasAuthority();
+
+	// ── 伤害飘字 ──
+	// 走 NetMulticast 而不是上面那种 GameplayEvent —— 因为飘字是**每个客户端
+	// 各自要画**的东西，而 GameplayEvent 只在服务器广播。
+	//
+	// 这里能拿到的是"谁挨打了、掉了多少血、打在哪"，
+	// 至于那个数字长什么样、往哪飘、飘多久，全是 HUD 的事。
+	// 属性集只负责把事实送到每一端。
+	//
+	// ⚠️ 必须和下面的事件一样**只在服务器调用**。
+	// 这个函数在预测路径上也会跑到（见上面的说明），而 NetMulticast 在
+	// 非服务器上调用的编译结果就是**在本地直接执行 _Implementation**
+	// （Actor.cpp 的 GetFunctionCallspace：非服务器且未标 BlueprintAuthorityOnly
+	//  时返回 Callspace，而不是拒绝）。
+	// 于是预测的客户端先本地冒一个数字，随后服务器的权威广播又冒一个 —— 两份。
+	// 单机（NM_Standalone）返回的是 Local，所以要保留"本地执行"这条路，
+	// 不能用"只在服务器才调 RPC"以外的办法绕开。
+	if (bAuthority)
+	{
+		if (ARPG_BaseCharacter* OwningCharacter = Cast<ARPG_BaseCharacter>(OwningActor))
+		{
+			// 优先用命中点：武器轨迹检测把 HitResult 塞进了 EffectContext
+			// （见 URPG_GameplayAbilityBase::ApplyDamageToTarget 里的 AddHitResult）。
+			// 拿不到就回落到角色胸口高度 —— 模拟命中、DOT、陷阱伤害都没有命中点，
+			// 没有这个兜底的话那些伤害会一声不响，看起来像"打了没反应"。
+			FVector NumberLocation;
+			if (const FHitResult* Hit = Data.EffectSpec.GetContext().GetHitResult())
+			{
+				NumberLocation = Hit->ImpactPoint;
+			}
+			else
+			{
+				NumberLocation = OwningActor->GetActorLocation()
+					+ FVector(0.f, 0.f, OwningCharacter->GetSimpleCollisionHalfHeight());
+			}
+
+			OwningCharacter->Multicast_ShowDamageNumber(LocalDamage, NumberLocation);
+		}
+	}
+
+	// ── 死亡判定 ──
+	// 走到这里说明 OldHealth > 0（上面那道早退已经挡住了尸体），
+	// 所以只需要看新血量是不是归零 —— "从活到死"这个跨越因此只触发一次。
+	if (NewHealth <= 0.f)
+	{
+		if (bAuthority)
+		{
+			UE_LOG(LogRPG_Combat, Log, TEXT("[%s] 生命归零，广播死亡事件"), *GetNameSafe(OwningActor));
+
+			// 用 GameplayEvent 而不是直接调用死亡逻辑——保持"表现层不做逻辑"的分层原则：
+			// 死亡的表现（蒙太奇、布娃娃、AI 停止）由 GA_Death 去处理，
+			// 属性集只管广播事实。
+			FGameplayEventData Payload;
+			Payload.EventTag = RPGTags::Event_Combat_Death;
+			Payload.Instigator = Data.EffectSpec.GetContext().GetInstigator();
+			Payload.Target = OwningActor;
+			// 把"最后一击的伤害"带出去，死亡表现可以据此区分轻重击
+			Payload.EventMagnitude = LocalDamage;
+
+			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(OwningActor, RPGTags::Event_Combat_Death, Payload);
+		}
+	}
+	else if (bAuthority)
+	{
+		// ── 没死 → 广播受击事件 ──
+		//
+		// 和死亡事件二选一（else if）：致命伤走死亡分支，其余走受击分支。
+		// 两个都发的话，受击反应会和死亡蒙太奇抢动画，表现上会闪一下。
 		FGameplayEventData Payload;
-		Payload.EventTag = RPGTags::Event_Combat_Death;
+		Payload.EventTag = RPGTags::Event_Combat_Hit;
 		Payload.Instigator = Data.EffectSpec.GetContext().GetInstigator();
 		Payload.Target = OwningActor;
+		Payload.EventMagnitude = LocalDamage;
 
-		UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(OwningActor, RPGTags::Event_Combat_Death, Payload);
+		UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(OwningActor, RPGTags::Event_Combat_Hit, Payload);
+
+		UE_LOG(LogRPG_Combat, Verbose, TEXT("[%s] 广播受击事件（%.1f 点）"),
+			*GetNameSafe(OwningActor), LocalDamage);
 	}
 }
 

@@ -6,6 +6,7 @@
 #include "Core/RPG_LogChannels.h"
 #include "Core/RPG_PlayerController.h"
 #include "Core/RPG_PlayerState.h"
+#include "UI/RPG_HUD.h"
 
 ARPG_GameModeBase::ARPG_GameModeBase()
 {
@@ -25,6 +26,19 @@ ARPG_GameModeBase::ARPG_GameModeBase()
 	DefaultPawnClass = ARPG_Player::StaticClass();
 	PlayerStateClass = ARPG_PlayerState::StaticClass();
 	PlayerControllerClass = ARPG_PlayerController::StaticClass();
+
+	// ══════════════════════════════════════════════════════════════════
+	//  HUD
+	// ══════════════════════════════════════════════════════════════════
+	// 引擎会为**每个本地玩家**创建一个 HUD 实例 —— 这正是我们要的语义：
+	// listen server 主机上，远程玩家的 PlayerController 也有自己的 AHUD，
+	// 但 `ARPG_HUD::BeginPlay` 里用 IsLocalController() 把它挡掉了，
+	// 所以那台机器上只会多出几个空壳，不会重复创建 UI。
+	//
+	// ⚠️ 这里给了 C++ 默认值，但**真正要用的子类必须在蓝图里指定**：
+	// WBP_RPG_HUD 是蓝图资产，C++ 这边引用不到。
+	// 和 DefaultPawnClass 是同一个道理 —— 见 PHASE7_UI_SETUP.md 第 6 步。
+	HUDClass = ARPG_HUD::StaticClass();
 
 	UE_LOG(LogRPG, Verbose, TEXT("ARPG_GameModeBase 构造完成，默认类已指定"));
 }

@@ -115,7 +115,7 @@
 | `Input.Attack.Light` | 能力循环 → `GA_LightAttack` | ⏳ 阶段 2 |
 | `Input.Attack.Heavy` | 能力循环 → `GA_HeavyAttack` | ⏳ 阶段 2 |
 | `Input.Dodge` | 能力循环 → `GA_Dodge` | ⏳ 阶段 2 |
-| `Input.Spell.1 / 2 / 3` | 能力循环 → `GA_Spell_*` | ⏳ 阶段 6 |
+| `Input.Spell.1 / 2 / 3` | 能力循环 → `GA_Spell_*` | ⏳ 阶段 9（三法术） |
 
 > ⚠️ **`Input.Crouch` 是唯一不走 GAS 的标签**——蹲伏不消耗耐力、没有冷却、不会被技能打断，
 > 走 GAS 是纯负担。所以它配在 `Crouch Action` 字段里，**不要**配到

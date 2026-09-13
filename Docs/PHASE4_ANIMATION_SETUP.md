@@ -23,7 +23,7 @@
 | **`MovementState`** | 枚举 | `Grounded` / `Sprinting` / `InAir` / `Crouching` ★ 状态机切换依据 |
 | `bIsAttacking` | bool | 攻击中（轻击连段 + 重击都算） |
 | `bIsDodging` | bool | 闪避中 |
-| `bIsSprinting` | bool | 冲刺中 |
+| `bIsSprinting` | bool | 冲刺中（挂 `State.Sprinting` 标签，**且真的在移动**）|
 | `bIsCharging` | bool | 蓄力中 |
 | `ChargeLevel` | int32 | 蓄力段位 0~3 |
 | `bIsInvulnerable` | bool | 无敌帧中 |
@@ -340,6 +340,7 @@ C++ 侧提供了 `GetAnimationDebugString()`。在 AnimBP 的
 | 攻击蒙太奇没反应 | 蒙太奇的 Slot 名和 AnimGraph 里 Slot 节点的名字不一致 |
 | 蹲下时动画是"蹲着慢跑" | 混合空间横轴用了 `Speed` 而不是 `SpeedRatio` |
 | 冲刺起步瞬间播的是跑步动画 | 正常现象 —— 冲刺状态靠标签判定，标签在 GA 激活那一帧才挂上。嫌突兀就把 Sprinting 状态的混合时间调大 |
+| **站着不动却原地踏步** | `MovementState` 判成了 `Sprinting`。它要求**标签和你真的在动两个条件**（`bIsSprinting && Speed > IdleSpeedThreshold`）—— 只挂标签不判速度的话，站着也会进跑步状态机，而那个混合空间在 `SpeedRatio = 0` 处播的是最慢的采样点（走路）|
 
 ---
 

@@ -15,7 +15,7 @@ class URPG_AbilitySystemInterface : public UInterface
 };
 
 /**
- * RPG 角色的能力系统接口。
+ * RPG 角色的能力系统接口:
  *
  * ══════════════════════════════════════════════════════════════════════
  * 【为什么还需要这个接口？引擎不是已经有 IAbilitySystemInterface 了吗】
@@ -28,9 +28,8 @@ class URPG_AbilitySystemInterface : public UInterface
  *     · 所以：**必须实现**，不实现的话 GAS 根本找不到你的 ASC
  *
  *   IRPG_AbilitySystemInterface（本接口）
- *     · 只补充游戏层需要的查询：属性集、是否存活
+ *     · 只补充游戏层需要的查询：如属性集、是否存活等
  *     · **不重复提供 GetAbilitySystemComponent()** —— 那是引擎接口的职责，
- *       再定义一个同功能的函数只会让调用方纠结"该调哪个"
  *
  * ══════════════════════════════════════════════════════════════════════
  * 【ASC 挂在哪是一个必须被封装掉的差异】
@@ -49,7 +48,7 @@ public:
 	/**
 	 * 获取 RPG 属性集。
 	 *
-	 * 实现者负责处理"ASC 可能不在自己身上"的情况：
+	 * 【实现者负责处理"ASC 可能不在自己身上"的情况】
 	 *   玩家角色  → 转发到 PlayerState 的 AttributeSet
 	 *   敌人      → 返回自己的 AttributeSet
 	 *
@@ -60,7 +59,7 @@ public:
 	/**
 	 * 是否存活。
 	 *
-	 * 判定依据是 State.Dead 标签而不是 Health 数值——
+	 * 【判定依据是 State.Dead 标签是否存在】 而不是 Health 数值——
 	 * 因为标签是"状态"的唯一真相源，而 Health 可能被各种 Buff 短暂改写。
 	 * AI 选目标、伤害前置检查、UI 刷新都用它。
 	 */

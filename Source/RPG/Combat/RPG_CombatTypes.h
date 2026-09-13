@@ -87,6 +87,7 @@ struct FRPG_BufferedInput
 	UPROPERTY(BlueprintReadOnly, Category = "RPG|Input")
 	float LifeTime = 0.5f;
 
+	/** 是否过期 */
 	bool IsExpired(float Now) const
 	{
 		return (Now - Timestamp) > LifeTime;

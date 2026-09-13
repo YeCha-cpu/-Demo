@@ -20,9 +20,12 @@
  *   · 重构重命名是安全的
  *   · 模块加载时自动向标签表注册（不需要再手写 ini）
  *
+ *
  * 代价是改标签要重新编译。所以工程约定：
  *   · 影响代码逻辑的"骨架标签" → 用 C++ 声明（本文件）
  *   · 纯内容配置、策划频繁调整的标签 → 后续可另建 ini
+ *
+ * 用 UE_DECLARE_GAMEPLAY_TAG_EXTERN 宏用于声明一个外部定义的游戏玩法标签。
  *
  * ══════════════════════════════════════════════════════════════════════
  * 【命名规范】<域>.<类别>.<子类别>.<具体>，不超过 5 段，用单数名词
@@ -65,6 +68,17 @@ namespace RPGTags
 	//  Ability —— 能力标识
 	//  用 ASC->TryActivateAbilitiesByTag() 触发；也用作 GA 的 AssetTags
 	// ══════════════════════════════════════════════════════════════════
+	/**
+	 * 攻击类能力的**父标签**（本身不挂在任何能力上）。
+	 *
+	 * 用途：给 `CancelAbilities()` 当"取消组"用 ——
+	 * 它的匹配是**层级式**的，传这个父标签就能一次命中
+	 * `Ability.Attack.Light` 和 `Ability.Attack.Heavy`。
+	 *
+	 * 好处是加新的攻击类型（比如 `Ability.Attack.Special`）时，
+	 * "受击要打断攻击"那处代码不用回来改。
+	 */
+	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Attack);
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Attack_Light);
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Attack_Light_01);
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Attack_Light_02);
@@ -101,9 +115,30 @@ namespace RPGTags
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Attack_Charging_Lv1);
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Attack_Charging_Lv2);
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Attack_Charging_Lv3);
+	/**
+	 * 切手技进行中（轻击连段中按右键切入的那一招）。
+	 *
+	 * 为什么要单独一个标签，而不是让 UI 去猜：
+	 * 切手技和蓄力重击**共用同一个 GA、同一个输入**（见 URPG_GA_HeavyAttack），
+	 * 走哪条分支只由"激活瞬间在不在轻击连段里"决定，是 GA 的私有状态。
+	 * 没有这个标签的话，HUD 想显示"当前在放什么招"就只能：
+	 *   · 要么 Cast 到 GA 去读私有成员（GA 实例还会随能力结束被回收）
+	 *   · 要么靠蒙太奇名字猜（改名就坏）
+	 * 挂成标签之后，"当前招式"这件事对所有系统都是可查的公共状态。
+	 */
+	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Attack_Transition);
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Dodging);
 	/** ★ 无敌帧。伤害 GE 检查此标签决定是否生效 */
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Invulnerable);
+	/**
+	 * 以高于行走的速度移动。
+	 *
+	 * 玩家的冲刺（GA_Sprint）和 AI 追击时切到的战斗速度都挂这个标签 ——
+	 * 它们对动画的要求是一样的："别再播走路了"。
+	 *
+	 * 动画蓝图靠它决定用哪条移动状态机
+	 * （见 URPG_AnimInstanceBase::UpdateLocomotion 的 MovementState）。
+	 */
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Sprinting);
 	/** 格挡（下期内容，先占位，避免将来改标签名） */
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Blocking);

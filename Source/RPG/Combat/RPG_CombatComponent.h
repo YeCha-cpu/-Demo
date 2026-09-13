@@ -12,10 +12,10 @@ class URPG_InputBuffer;
 class URPG_AttackModuleData;
 
 /**
- * 战斗状态组件。敌我共用，挂在 RPG_BaseCharacter 上。
+ * 战斗状态组件。敌我共用，挂在 RPG_BaseCharacter 上：
  *
  * ══════════════════════════════════════════════════════════════════════
- * 【它管什么，不管什么】
+ * 【管什么，不管什么】
  * ══════════════════════════════════════════════════════════════════════
  * 管：
  *   · 输入缓存（URPG_InputBuffer 的持有者与生命周期管理）
@@ -23,8 +23,8 @@ class URPG_AttackModuleData;
  *   · 当前攻击模组（徒手 / 近战 / 远程）
  *
  * 不管：
- *   · 能力怎么触发、动画怎么播     → GA
- *   · 伤害怎么算                   → DamageExecution
+ *   · 能力怎么触发、动画怎么播      → GA
+ *   · 伤害怎么算                 → DamageExecution
  *   · "是否正在攻击"这个状态       → GameplayTag（State.Attacking）
  *
  * ══════════════════════════════════════════════════════════════════════
@@ -131,7 +131,7 @@ protected:
 	 * 太长 → 玩家乱按后角色会自己动，感觉"失控"
 	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RPG|Combat", meta = (ClampMin = "0.05", ClampMax = "2.0"))
-	float InputLifeTime = 0.5f;
+	float InputLifeTime = 1.f;
 
 private:
 	/** 输入缓存容器。BeginPlay 时创建 */

@@ -7,6 +7,7 @@
 
 #include "AbilitySystem/RPG_AbilitySystemComponent.h"
 #include "AbilitySystem/RPG_AttributeSet.h"
+#include "AI/RPG_AIController.h"
 #include "Core/RPG_LogChannels.h"
 
 ARPG_Enemy::ARPG_Enemy()
@@ -18,10 +19,18 @@ ARPG_Enemy::ARPG_Enemy()
 	// 原因是构造函数可能对 CDO 执行多次，而 AddSpawnedAttribute 会改动内部数组；
 	// 放到初始化函数里能保证"每个实例只登记一次"。
 
-	// 阶段 5 会在这里补上：
-	//     AIControllerClass = ARPG_AIController::StaticClass();
-	//     AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
-	// 现在先不设，避免依赖尚不存在的 AI 类。
+	// ══════════════════════════════════════════════════════════════════
+	//  AI 接管
+	// ══════════════════════════════════════════════════════════════════
+	// 必须两个都设，少一个敌人都会站着不动：
+	//   · AIControllerClass —— 用哪个大脑
+	//   · AutoPossessAI     —— 什么时候自动接管
+	//
+	// 只设 AIControllerClass 的话，敌人会一直等一个永远不会来的
+	// PlayerController；而"没被占有"在引擎看来是完全正常的状态，
+	// 所以**不报任何错** —— 又一个静默失败。
+	AIControllerClass = ARPG_AIController::StaticClass();
+	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 }
 
 void ARPG_Enemy::BeginPlay()
@@ -44,6 +53,40 @@ void ARPG_Enemy::PossessedBy(AController* NewController)
 UAbilitySystemComponent* ARPG_Enemy::GetASCInternal() const
 {
 	return AbilitySystemComponent;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  死亡 / 重生的 AI 挂钩
+// ══════════════════════════════════════════════════════════════════════
+
+void ARPG_Enemy::OnDeathStarted()
+{
+	Super::OnDeathStarted();
+
+	// 敌人的"大脑"和"身体"是两个对象，死亡时两边都要处理：
+	//   · 身体   → GA_Death 已经在做了（挂 State.Dead、进布娃娃）
+	//   · 大脑   → 就是这里
+	// 只处理身体不处理大脑的话，行为树会对着尸体继续发指令 —— 见头文件。
+	if (ARPG_AIController* AIController = Cast<ARPG_AIController>(GetController()))
+	{
+		AIController->StopAI();
+	}
+}
+
+void ARPG_Enemy::OnRespawned()
+{
+	Super::OnRespawned();
+
+	// 和 OnDeathStarted 严格配对。少了这一步，敌人复活后会站着不动 ——
+	// 行为树在死亡时被停了，没人把它拉起来，而且不会有任何报错。
+	//
+	// 基类的 PerformRespawn 会先 ResetForRespawn() 再传送，
+	// 所以走到这里时 State.Dead 已经摘掉、属性已经回满 ——
+	// AI 重新开始跑的时候看到的是一个健康的敌人。
+	if (ARPG_AIController* AIController = Cast<ARPG_AIController>(GetController()))
+	{
+		AIController->RestartAI();
+	}
 }
 
 void ARPG_Enemy::InitializeAbilitySystem()

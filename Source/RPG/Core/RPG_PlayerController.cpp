@@ -23,7 +23,7 @@ ARPG_PlayerController::ARPG_PlayerController()
 {
 	// ⚠️⚠️ 绝对不要在这里写 PrimaryActorTick.bCanEverTick = false; ⚠️⚠️
 	//
-	// 我踩过这个坑：当时的理由是"增强输入是事件驱动的，不需要每帧处理"。
+	// 踩过这个坑：当时的理由是"增强输入是事件驱动的，不需要每帧处理"。
 	// 这个判断是**错的**。增强输入的 Triggered / Started / Completed 事件，
 	// 恰恰是在每帧的输入处理里评估 InputMappingContext 的 Trigger 才产生的：
 	//
@@ -274,14 +274,13 @@ void ARPG_PlayerController::OnAbilityInputPressed(FGameplayTag InputTag)
 	UE_LOG(LogRPG_Ability, Log, TEXT("[%s] 收到能力输入：%s"), *GetName(), *InputTag.ToString());
 
 	URPG_AbilitySystemComponent* ASC = GetRPGAbilitySystemComponent();
-
 	if (!ASC)
 	{
 		// 拿不到 ASC 几乎总是因为 PlayerStateClass 没指向 RPG_PlayerState 的蓝图子类
 		// —— 玩家的 ASC 挂在 PlayerState 上，那一环断了这里就永远是空。
 		UE_LOG(LogRPG_Ability, Warning,
 			TEXT("[%s] 拿不到 ASC，输入 %s 无法处理 —— "
-			     "请检查 GameMode 的 PlayerStateClass 是否指向 RPG_PlayerState 的蓝图子类"),
+				"请检查 GameMode 的 PlayerStateClass 是否指向 RPG_PlayerState 的蓝图子类"),
 			*GetName(), *InputTag.ToString());
 		return;
 	}
@@ -297,6 +296,23 @@ void ARPG_PlayerController::OnAbilityInputPressed(FGameplayTag InputTag)
 	//   · 结果就是"连按没有衔接，只能等上一段完全播完再按"
 	if (ARPG_BaseCharacter* RPGChar = GetRPGCharacter())
 	{
+		// ── 死了就不推输入、也不尝试激活 ★ ──
+		//
+		// 不做这道判断的话，死亡期间（3 秒重生倒计时里）玩家每按一次键都会：
+		//   ① 往缓存里塞一条永远没人取的输入
+		//   ② 让 GA 走一遍 CanActivateAbility → 被 State.Dead 阻断 →
+		//      基类打一条 Warning「CanActivateAbility 被引擎拒绝」
+		// 表现是**死亡期间按键刷屏告警**，把真正有用的信息淹掉。
+		//
+		// 判断放在这里而不是各个 GA 里：控制器是玩家意图的入口，
+		// "死人没有意图"这件事应该在最靠前的地方被挡掉。
+		// （GA 侧的 ActivationBlockedTags 仍然保留 —— 那是给 AI 和
+		//   其他非输入路径兜底的，两道防线管的不是同一件事。）
+		if (!RPGChar->IsAlive())
+		{
+			return;
+		}
+
 		if (URPG_CombatComponent* Combat = RPGChar->GetCombatComponent())
 		{
 			Combat->PushInputTag(InputTag);

@@ -46,7 +46,7 @@
 | 层 | 内容 | 状态 |
 |---|---|---|
 | **L1 基础复制** | 属性集 `ReplicatedUsing` + `OnRep_*`、ASC 复制开关、服务器/客户端权威分支 | ✅ 阶段 1 已实现 |
-| **L2 权威与预测** | GA 的 `NetExecutionPolicy`、伤害服务器权威判定、蒙太奇与 GameplayCue 全端同步 | ✅ 阶段 2 已实现 |
+| **L2 权威与预测** | GA 的 `NetExecutionPolicy`、伤害服务器权威判定、蒙太奇与 GameplayCue 全端同步 | ⚠️ 阶段 2 已实现，但**客户端输入激活链路有个待修的洞** —— 见 §15 |
 | **L3 进阶** | 延迟补偿、位置回滚、专用服务器、网络平滑调参 | ❌ 不做 |
 
 - **主模式：Listen Server** —— PIE 里设 `Number of Players = 2` + `Net Mode = Play As Listen Server` 即可测试，不需要额外打包 Dedicated Server
@@ -61,7 +61,7 @@
 - ❌ **存档 / 关卡流程 / 任务系统**
 - ❌ **格挡**——本期不做，架构预留 `State.Blocking` 标签位与 `GA_Block` 类名
 - ❌ **复杂的 UI**——只做属性条 HUD
-- ❌ **美术资源制作**——用引擎自带 Mannequin + 商城免费动画
+- ❌ **美术资源制作**——角色用 Mixamo 的 `X_Bot` + 配套动画包（已导入 `_My/Animation/`）
 
 ---
 
@@ -102,7 +102,7 @@ Source/RPG/
 │   ├── RPG_PlayerController.h/.cpp         ★ 增强输入、输入标签路由
 │   ├── RPG_GameplayTags.h/.cpp             ★ 全部原生 GameplayTag 的 C++ 声明
 │   ├── RPG_LogChannels.h/.cpp              自定义日志类别
-│   └── RPG_AssetManager.h/.cpp             资产加载（阶段 6 再加，先留空位）
+│   └── RPG_AssetManager.h/.cpp             资产加载（阶段 9 再加，先留空位）
 │
 ├── Character/                              ── 角色层：表现与移动
 │   ├── RPG_BaseCharacter.h/.cpp            ★ 弹簧臂/相机/移动/共用组件容器
@@ -114,7 +114,7 @@ Source/RPG/
 │   ├── RPG_AbilitySystemComponent.h/.cpp   ★ 扩展 ASC：输入标签→能力映射、标签计数
 │   ├── RPG_AttributeSet.h/.cpp             ★ 敌我共用属性集
 │   ├── RPG_AbilitySystemLibrary.h/.cpp     静态辅助：从任意 Actor 取 ASC
-│   ├── RPG_AbilitySystemGlobals.h/.cpp     自定义 EffectContext（阶段 6）
+│   ├── RPG_AbilitySystemGlobals.h/.cpp     自定义 EffectContext（阶段 9）
 │   │
 │   ├── Abilities/                          ── 所有 GA
 │   │   ├── RPG_GameplayAbilityBase.h/.cpp      基类：常用查询、蒙太奇播放入口
@@ -126,7 +126,8 @@ Source/RPG/
 │   │   ├── RPG_GA_StaminaRegen.h/.cpp          被动耐力恢复
 │   │   ├── RPG_GA_Heal.h/.cpp                  回血（后续法术复用）
 │   │   ├── RPG_GA_ApplyBuff.h/.cpp             加攻/加防
-│   │   └── RPG_GA_Death.h/.cpp                 死亡表现
+│   │   ├── RPG_GA_HitReact.h/.cpp              ★ 受击反应（监听 Event.Combat.Hit）
+│   │   └── RPG_GA_Death.h/.cpp                 ★ 死亡编排者（监听 Event.Combat.Death）
 │   │
 │   ├── Effects/                            ── 所有 GE 与执行计算
 │   │   ├── RPG_DamageExecution.h/.cpp          ★ 伤害执行计算
@@ -162,7 +163,7 @@ Source/RPG/
 │
 ├── Input/                                  ── 输入层：只做映射，不做逻辑
 │   ├── RPG_InputConfig.h/.cpp              ★ PrimaryDataAsset: InputAction ↔ GameplayTag
-│   └── RPG_InputComponent.h/.cpp           输入转发组件（可选，阶段 6）
+│   └── RPG_InputComponent.h/.cpp           输入转发组件（可选，阶段 9）
 │
 ├── Interfaces/                             ── 接口层：跨层查询契约
 │   ├── RPG_AbilitySystemInterface.h        ★ 统一 GetAbilitySystemComponent
@@ -179,19 +180,25 @@ Source/RPG/
 │       └── RPG_AnimNotify_SendGameplayEvent.h/.cpp  通用事件广播
 │
 ├── AI/                                     ── AI 层
-│   ├── RPG_AIController.h/.cpp             ★ 感知 + 黑板 + 行为树
+│   ├── RPG_AIController.h/.cpp             ★ 感知 + 黑板 + 行为树 + StopAI/RestartAI
+│   ├── RPG_BlackboardKeys.h/.cpp           ★ 黑板键名常量（拼错编译不过）
 │   ├── Tasks/
-│   │   ├── BTTask_RPG_Patrol.h/.cpp            巡逻
-│   │   ├── BTTask_RPG_MoveToTarget.h/.cpp      追击
-│   │   └── BTTask_RPG_Attack.h/.cpp            ★ 触发攻击 GA 并等待结束
+│   │   ├── RPG_BTTask_MoveBase.h/.cpp          移动类任务的共同基类
+│   │   ├── RPG_BTTask_Patrol.h/.cpp            巡逻
+│   │   ├── RPG_BTTask_MoveToTarget.h/.cpp      追击 / 去最后已知位置搜索
+│   │   └── RPG_BTTask_Attack.h/.cpp            ★ 触发攻击 GA 并轮询等它结束
 │   ├── Services/
-│   │   └── BTService_RPG_PerceptionUpdate.h/.cpp   更新目标信息到黑板
+│   │   └── RPG_BTService_CombatUpdate.h/.cpp   目标记忆 / 脱战计时 / 目标死亡检测
 │   └── Decorators/
-│       └── BTDecorator_RPG_CanAttack.h/.cpp        攻击冷却与状态检查
+│       └── RPG_BTDecorator_CanAttack.h/.cpp    距离 + 存活判定
 │
-└── UI/                                     ── UI 层
-    ├── RPG_HUDWidget.h/.cpp
-    └── RPG_AttributeBarWidget.h/.cpp
+└── UI/                                     ── UI 层：只读 GAS 状态，不参与玩法逻辑
+    ├── RPG_HUD.h/.cpp                     ★ AHUD：创建主 HUD + 生成伤害飘字
+    ├── RPG_HUDWidget.h/.cpp               ★ 主 HUD：属性区 / 招式区 / 死亡面板
+    ├── RPG_AttributeBarWidget.h/.cpp      ★ 通用属性条（三条共用）
+    ├── RPG_OverheadHealthBarWidget.h/.cpp 头顶血条（其他玩家 + AI）
+    ├── RPG_OverheadHealthBarComponent.h/.cpp ★ 头顶血条的组件（显式传主人，见下）
+    └── RPG_DamageNumberWidget.h/.cpp      伤害飘字（屏幕空间，自管理生命周期）
 ```
 
 ★ = 核心文件，优先实现
@@ -450,6 +457,43 @@ void URPG_GA_LightAttack::OnAttackWindowOpen(FGameplayEventData Payload)
 
 > 💡 **Payload 里带什么**：`FGameplayEventData` 有 `OptionalObject` / `OptionalObject2` / `ContextHandle` / `TargetData` 等字段。把"单次攻击信息"（伤害倍率、检测源类型、检测半径）打包成一个 `UObject`（如 `URPG_AttackWindowPayload`）塞进 `OptionalObject`，GA 侧取出来用。这样 Notify 上配置不同参数就能驱动不同段的攻击，无需为每段写一个 GA。
 
+### 4.6 受击与死亡链路（阶段 6）
+
+**同一套机制，方向反过来**：4.5 讲的是"动画 → GA"（AnimNotify 广播事件），
+这里讲的是"属性 → GA"（属性集广播事件）。连接点仍然是标签，不是函数调用。
+
+```
+GE_Damage 结算 → IncomingDamage 写入（服务器）
+   │
+   └─► RPG_AttributeSet::PostGameplayEffectExecute
+          │
+          ├─ OldHealth <= 0 ？ → 直接 return（尸体挨打不广播任何事件）
+          │
+          ├─ NewHealth <= 0  → SendGameplayEventToActor(Event.Combat.Death)
+          │                       └─► URPG_GA_Death
+          │                             ① 挂 State.Dead（loose tag，CountToOwner）
+          │                             ② CancelAllAbilities(this)
+          │                             ③ Character->OnDeathStarted()   ← 敌人这里 StopAI()
+          │                             ④ 播死亡蒙太奇
+          │                             ⑤ EnterRagdoll() + StartRespawnCountdown()
+          │
+          └─ 否则 → SendGameplayEventToActor(Event.Combat.Hit)
+                      └─► URPG_GA_HitReact
+                            打断 Ability.Attack / Ability.Dodge
+                            挂 State.Hit → 播受击蒙太奇 → 播完自动摘标签
+```
+
+| 设计点 | 选择 | 理由 |
+|---|---|---|
+| 事件在哪广播 | **只在服务器**（`HasAuthority()`） | 客户端的血量是本地预测的，但**委托不会回滚** —— 两端都发会出现"死了一次又活过来" |
+| `State.Dead` 用什么载体 | **loose tag**，不用 GE | 复活时要 `RemoveActiveEffects` 清空所有 GE，死亡标记若是 GE 会被顺手清掉，逻辑就得靠副作用推断状态 |
+| 死亡后怎么挡住新能力 | 基类的 `ActivationBlockedTags` | 一处声明，所有 GA 自动生效；顺带挡住"第二次死亡" |
+| 布娃娃怎么同步 | 只复制 `bRagdollEnabled` 开关 | 物理状态不是复制属性，各端各自模拟。逐帧一致要用 Network Physics（L3，不做） |
+| 复活后常驻能力怎么办 | `ReactivatePassiveAbilities()` | 死亡时 `CancelAllAbilities` 把 `GA_StaminaRegen` 也停了，不重启 → **耐力永远不恢复且不报错** |
+| 敌人死亡后 AI 怎么办 | `OnDeathStarted()` → `StopAI()` | 行为树没有"我死了"的概念，不主动停会卡在永不结束的 Latent Task 上 |
+
+> ⚠️ 完整配置步骤见 [`PHASE6_HIT_DEATH_SETUP.md`](./PHASE6_HIT_DEATH_SETUP.md)。
+
 ---
 
 ## 5. 属性集与伤害计算
@@ -651,6 +695,7 @@ struct FRPGDamageStatics
 
 ```
 ├─ Ability
+│   ├─ Ability.Attack                ★ 父标签，只用作取消组，不挂任何能力
 │   ├─ Ability.Attack.Light
 │   ├─ Ability.Attack.Heavy
 │   ├─ Ability.Dodge
@@ -658,8 +703,8 @@ struct FRPGDamageStatics
 │   ├─ Ability.Jump
 │   ├─ Ability.Heal
 │   ├─ Ability.Buff.AttackUp
-│   ├─ Ability.StaminaRegen          (被动)
-│   ├─ Ability.Death                 (被动)
+│   ├─ Ability.StaminaRegen          (被动，授予即激活)
+│   ├─ Ability.Death                 (事件驱动，授予后待命)
 │   └─ Ability.Spell.1 / .2 / .3     (黑神话式三法术，后续)
 │
 ├─ Input
@@ -680,9 +725,10 @@ struct FRPGDamageStatics
 │   ├─ State.Attack.Charging.Lv1 / .Lv2 / .Lv3
 │   ├─ State.Dodging
 │   ├─ State.Invulnerable           ★ 无敌帧
-│   ├─ State.Sprinting
+│   ├─ State.Sprinting              以高于行走的速度移动（玩家冲刺 / AI 追击共用）
 │   ├─ State.Blocking               (预留，下期)
-│   ├─ State.Dead
+│   ├─ State.Hit                    ★ 受击中（由 GA_HitReact 的 ActivationOwnedTags 挂）
+│   ├─ State.Dead                   ★ 由 GA_Death 用 loose tag 挂，复活时显式摘掉
 │   ├─ State.Stamina.Blocked        ★ 恢复阻断
 │   └─ State.Combat.InCombat
 │
@@ -1255,6 +1301,21 @@ AIPerception->OnTargetPerceptionUpdated 委托
         └── Wait                                 巡逻点停留 1~3s
 ```
 
+**★ 战斗分支的装饰器必须设 `Flow Abort Mode = Lower Priority`**
+
+这是"玩家一进视野就立刻追"的关键，而它默认是 `Nothing`。
+
+行为树的 Selector **不会主动重新判断**：敌人正在执行巡逻分支时，
+Selector 就"卡"在那个分支上，直到它自己走完才回头看战斗分支 ——
+表现是"玩家都站到脸上了，敌人还在慢悠悠走完这个巡逻点"。
+
+把 `Flow Abort Mode` 从 `Nothing` 改成 `Lower Priority` 之后，
+这个装饰器会把自己注册成**观察者**（`BTCompositeNode.cpp:287-292`）：
+条件不成立时每帧重新检查，一旦成立就立刻打断右侧的巡逻分支。
+延迟在一帧以内。
+
+> 详细步骤与四个选项的区别见 [`PHASE5_AI_SETUP.md`](./PHASE5_AI_SETUP.md) §2.3。
+
 ### 9.4 自定义 BT 节点
 
 **`BTTask_RPG_Attack`（最复杂的一个）**
@@ -1410,8 +1471,10 @@ Content/RPG/
 │   └── DA_RPG_InputConfig
 │
 ├── UI/
-│   ├── WBP_RPG_HUD
-│   └── WBP_AttributeBar
+│   ├── WBP_RPG_HUD               主 HUD
+│   ├── WBP_AttributeBar          属性条基座（血/蓝/耐力三个子类共用）
+│   ├── WBP_OverheadHealthBar     头顶血条
+│   └── WBP_DamageNumber          伤害飘字
 │
 ├── FX/
 │   ├── NS_*                 Niagara 系统
@@ -1449,6 +1512,10 @@ Content/RPG/
 ---
 
 ## 12. 实施路线图
+
+> 📖 **先看复盘再看这里**：阶段 0~4 已经做完，它们的**为什么**整理在
+> [`REVIEW_PHASES_0-4.md`](./REVIEW_PHASES_0-4.md) ——
+> 那份文档回答"这些零件怎么咬合在一起"，本节只回答"还剩什么没做"。
 
 ### 阶段 0 · 地基 —— ✅ 已完成（2026-09-11）
 
@@ -1570,18 +1637,219 @@ Content/RPG/
 > 后者是角色状态（给动画 / AI / UI 查）。两者生命周期**碰巧**一样，
 > 但混用会在加新能力时出问题。
 
-### 阶段 5 · 敌人 AI（预计 1~1.5 天）
+### 阶段 5 · 敌人 AI —— ✅ 代码已完成
 
-- [ ] `BB_RPG_Enemy` 黑板资产 + `BT_RPG_Enemy` 行为树资产
-- [ ] `BTService_RPG_PerceptionUpdate` / `BTTask_RPG_Patrol` / `BTTask_RPG_MoveToTarget` / `BTTask_RPG_Attack` / `BTDecorator_RPG_CanAttack`
-- [ ] `ARPG_AIController` 感知配置
-- [ ] 敌人的攻击模组 DA
+- [x] `ARPG_AIController`（感知视觉+听觉、黑板初始化、启动行为树）
+- [x] `AI/RPG_BlackboardKeys.h` 黑板键名集中定义
+- [x] `URPG_BTService_CombatUpdate` —— 目标记忆 / 脱战计时 / 目标死亡检测
+- [x] `URPG_BTTask_MoveBase` —— 移动类任务的共同基类（潜在任务 + 超时兜底）
+- [x] `URPG_BTTask_Patrol` / `URPG_BTTask_MoveToTarget`
+- [x] `URPG_BTTask_Attack` —— 走和玩家相同的输入标签入口
+- [x] `URPG_BTDecorator_CanAttack`
+- [x] `ARPG_Enemy` 接上 AIControllerClass + AutoPossessAI
+- [x] 配置指南：[`PHASE5_AI_SETUP.md`](./PHASE5_AI_SETUP.md)
+- [ ] `BB_RPG_Enemy` / `BT_RPG_Enemy` / `BP_RPG_AIController`（编辑器操作）
+- [ ] 关卡里摆 NavMeshBoundsVolume 与巡逻点（编辑器操作）
 - [ ] **✅ 验收：敌人巡逻 → 发现玩家 → 追击 → 进入范围攻击 → 丢失目标后返回巡逻**
 
-### 阶段 6 · 打磨与扩展（持续）
+**本阶段跨到别的层的改动**（AI 要用，但不属于 AI 层）：
 
-- [ ] HUD（血条/耐力条/法力条，绑定 AttributeSet 委托）
-- [ ] 命中顿帧（HitStop）、镜头震动、伤害飘字
+| 文件 | 改了什么 | 为什么在这一阶段做 |
+|---|---|---|
+| `Character/RPG_BaseCharacter` | `CombatMoveSpeed` / `SetCombatMovement()` / `RefreshMaxWalkSpeed()` | "发现玩家就跑起来"要改 `MaxWalkSpeed`，而速度优先级（蹲伏 > 战斗 > 常态）只能有一份定义 |
+| `Character/RPG_BaseCharacter` | `SetCombatMovement` 里挂/摘 `State.Sprinting` | 只改速度不改标签 → 人快了但动画还在走。标签的语义在这一阶段被放宽成"以高于行走的速度移动" |
+| `Character/RPG_Enemy` | `AIControllerClass` + `AutoPossessAI` | 少任一个敌人都站着不动，且不报错 |
+| `Animation/RPG_AnimInstanceBase` | `MovementState` 增加"标签**且**真的在动"的双条件 | 光看标签会出"站着不动却在原地踏步" |
+| `Core/RPG_GameplayTags` | 扩充 `State.Sprinting` 的文档注释 | 它的含义变了，注释不改就是错的 |
+
+> 🕳️ **本阶段踩到的两个静默陷阱**（都写进了代码注释和附录 B）
+>
+> **① 感知的阵营检测默认全关 → AI 什么都看不见**
+> `FAISenseAffiliationFilter` 的三个开关默认全是 `false`，
+> 压成位掩码是 0，而 `ShouldSenseTeam` 用掩码做判断 —— 结果谁都感知不到。
+> 更绕的是默认态度求解器是 `A != B ? Hostile : Friendly`，
+> 而 AI 和玩家默认都是 `NoTeam`（255），所以算出来是 **Friendly** 不是 Neutral，
+> 只开 `bDetectNeutrals` 也没用。
+>
+> **② 行为树节点默认是共享实例**
+> `bCreateNodeInstance = false` 时，所有跑同一棵树的 AI 共用**同一个**节点对象。
+> 节点成员变量（比如"移动请求 ID""已等待时长"）会被多只敌人互相覆盖 ——
+> 表现是"第二只敌人一出现，第一只就走不到目的地了"。
+> 移动/攻击类节点都有逐实例状态，必须开这个开关。
+
+### 阶段 6 · 受击 / 死亡 / 重生 —— ✅ 代码已完成（2026-09-13）
+
+- [x] `URPG_GA_HitReact` —— 监听 `Event.Combat.Hit`，打断攻击/闪避，播受击蒙太奇
+- [x] `URPG_GA_Death` —— 监听 `Event.Combat.Death`，死亡流程的编排者
+- [x] `RPG_AttributeSet` 广播受击/死亡事件（**只在服务器**）
+- [x] `ARPG_BaseCharacter` —— 布娃娃（`EnterRagdoll`/`ExitRagdoll`）、
+      `ResetForRespawn`、`PerformRespawn`、蒙太奇池配置
+- [x] `bRagdollEnabled` 复制 + `OnRep_RagdollEnabled`
+- [x] `ARPG_AIController::StopAI` / `RestartAI` —— 死亡停大脑、重生重启
+- [x] `URPG_AbilitySystemComponent::ReactivatePassiveAbilities` —— 复活后重启常驻能力
+- [x] 配置指南：[`PHASE6_HIT_DEATH_SETUP.md`](./PHASE6_HIT_DEATH_SETUP.md)
+- [ ] 受击/死亡蒙太奇资产（编辑器操作）
+- [ ] 确认骨架网格体挂了 Physics Asset（编辑器操作，**布娃娃的前提**）
+- [ ] **✅ 验收：打死敌人 → 布娃娃倒地 → 玩家死亡 → 3 秒后回到 PlayerStart 满血复活**
+
+**本阶段跨到别的层的改动**：
+
+| 文件 | 改了什么 | 为什么在这一阶段做 |
+|---|---|---|
+| `AbilitySystem/RPG_AttributeSet` | `PostGameplayEffectExecute` 广播 `Event.Combat.Hit` / `Event.Combat.Death` | 这是"伤害 → 表现"的唯一连接点。属性集只广播事实，谁关心谁监听 |
+| `AbilitySystem/RPG_AttributeSet` | 事件广播加 `HasAuthority()` 守卫 | 客户端血量是预测的，但**委托不会回滚** |
+| `AbilitySystem/RPG_AbilitySystemComponent` | `ReactivatePassiveAbilities()` + `GivePassiveAbility` 的重复授予守卫 | 死亡时 `CancelAllAbilities` 会把耐力恢复一起停掉，复活后必须重启；守卫是给"重生会重新初始化"这条路径兜底 |
+| `AbilitySystem/Abilities/RPG_GameplayAbilityBase` | `PlayMontageOrSkip` 增加 `Rate` 参数 | 受击/死亡蒙太奇的播放速率配在角色上，而不是能力上 |
+| `AI/RPG_AIController` | `StopAI()` / `RestartAI()` | 行为树没有"我死了"的概念，不主动停会卡在永不结束的 Latent Task 上 |
+| `Character/RPG_Player` | `GetRespawnTransform()`（走 PlayerStart）+ `ClientSetLocation` | 本地控制的角色在客户端是 AutonomousProxy，位置和视角都不会自动同步 |
+| `Core/RPG_GameplayTags` | 新增 `Ability.Attack` **父标签** | 给 `CancelAbilities()` 当取消组，加新攻击类型不用回来改代码 |
+
+> 🕳️ **本阶段的核心设计：事件驱动，没有调用点**
+>
+> "血量归零"和"播死亡动画"之间**没有任何一行直接调用**。
+> 属性集只负责 `SendGameplayEventToActor(Event.Combat.Death)`，
+> 谁关心谁在构造函数里声明 `AbilityTriggers`。好处是：
+> 加"死亡掉装备""击杀给经验"都是新增监听者，**不用回头动伤害链路**。
+>
+> 🕳️ **本阶段踩到的三个坑**（都写进了代码注释）
+>
+> **① 事件广播必须只在服务器做。**
+> 客户端上的血量是本地预测的（`PredictivelyExecuteEffectSpec`），
+> 但**委托一旦发出去就收不回来** —— 预测失败时会出现
+> "死了一次又活过来"。属性值可以回滚，事件不行。
+>
+> **② 属性集里"从活到死"用 `OldHealth > 0` 做前置。**
+> 少了这一条，尸体每挨一刀都会重新广播一次死亡/受击事件。
+> 受击那条更隐蔽：`GA_HitReact` 会被 `State.Dead` 挡住，
+> 然后引擎通过 `AbilityFailedCallbacks` 报 Warning —— 打尸体刷屏。
+>
+> **③ `bRetriggerInstancedAbility` 默认 false。**
+> 不打开的话"连挨两下只有第一下有反应"，而且不报错
+> （`AbilitySystemComponent_Abilities.cpp:1846` 直接拒绝激活）。
+> 打开后引擎会先 `EndAbility` 旧实例再重新激活（同文件 `:1836-1844`），
+> 所以 `EndAbility` 里必须把旧的 AbilityTask 回调**先 RemoveDynamic 再 EndTask**
+> —— 这正是阶段 2 在轻击连段上踩过的同一个坑。
+
+### 阶段 7 · 战斗 HUD —— ✅ 代码已完成（2026-09-13）
+
+- [x] `ARPG_HUD` —— 本地玩家的 HUD 宿主（`HUDClass` 在 GameMode 里指定）
+- [x] `URPG_HUDWidget` —— 属性区（血/蓝/耐力 + 攻防数值）、招式区（蓄力条 + 招式名）、
+      闪避图标、死亡面板 + 重生倒计时
+- [x] `URPG_AttributeBarWidget` —— 通用属性条基类，带蓝图表现回调
+- [x] `URPG_OverheadHealthBarWidget` + `ARPG_BaseCharacter::OverheadHealthBar`
+      —— 其他玩家与 AI 的头顶血条（**本地玩家自动隐藏**）
+- [x] `URPG_DamageNumberWidget` + `ARPG_BaseCharacter::Multicast_ShowDamageNumber`
+      —— 伤害飘字（NetMulticast Unreliable，每端各画各的）
+- [x] 视觉规范 + 配置指南：[`PHASE7_UI_SETUP.md`](./PHASE7_UI_SETUP.md)
+- [ ] 四个 WBP 资产（编辑器操作）
+- [ ] `BP_RPG_HUD` 并在 GameMode 里指定 `HUD Class`（编辑器操作）
+- [ ] **✅ 验收：三条属性条实时跟随、按住右键蓄力条涨/松手归零、
+      其他玩家与 AI 头顶有血条、命中冒伤害数字、死亡弹面板**
+
+**本阶段跨到别的层的改动**（HUD 要用的数据当时不存在，只能先在别的层补通道）：
+
+| 文件 | 改了什么 | 为什么在这一阶段做 |
+|---|---|---|
+| `Core/RPG_GameplayTags` | 新增 `State.Attack.Transition` | HUD 要显示"切手技"，但当时它只是 `GA_HeavyAttack` 的私有成员 `bTransitionBranch`，UI 读不到；而且 GA 实例会随能力结束被回收。挂成标签后它对**所有**系统可见 |
+| `AbilitySystem/Abilities/RPG_GA_HeavyAttack` | 切手技分支挂/摘上面那个标签 | 标签的授予方。摘除放在 `ClearChargeTags()` 里，且**在判空之前** —— 切手技分支从不碰 `ActiveChargeTags`，放判空之后会永远摘不掉 |
+| `AbilitySystem/RPG_AttributeSet` | 伤害落地后调 `Multicast_ShowDamageNumber` | 飘字的数据源（伤害值 + 命中点） |
+| `Character/RPG_BaseCharacter` | `Multicast_ShowDamageNumber()` | 飘字要**每端各画一份**，而现成的 `Event.Combat.Hit` 只在服务器广播 |
+| `Character/RPG_BaseCharacter` | `OverheadHealthBar` 组件 + `IsLocallyControlledPlayer()` + `GetRespawnDelay()` | 头顶血条的载体、显示判据、重生倒计时数据源 |
+| `Core/RPG_GameModeBase` | `HUDClass` | HUD 的挂载点 |
+
+> 📌 **这一阶段改了 6 个不属于 `UI/` 的文件**，上表就是全部。
+> 它们都是"数据通道"——HUD 只读不写玩法状态，但需要先把状态变成公开可读的。
+> 这也是唯一一处 UI 层向外伸手的地方。
+
+> 💡 **本阶段最重要的一条设计：连续量用委托，布尔状态用轮询**
+>
+> | 数据 | 方式 | 理由 |
+> |---|---|---|
+> | 属性值（血/蓝/耐力/攻/防） | `GetGameplayAttributeValueChangeDelegate` | 有"值"、变化是离散事件；客户端上还能蹭引擎自己的复制回调 |
+> | 蓄力中 / 闪避中 / 死亡 / 招式段位 | 每帧 `HasMatchingGameplayTag` | 布尔状态，上事件监听要注册 6~8 个标签 + 维护解绑，代码量翻倍而收益为零 |
+>
+> 这套写法和 `URPG_AnimInstanceBase::UpdateCombatState()` 完全一致 ——
+> 项目里"C++ 读 GAS 状态、暴露给表现层"已经有惯例了，UI 沿用而不是另立一套。
+
+> 🕳️ **`IsLocallyControlled()` 在敌人身上恒为 true**
+>
+> 头顶血条的显示判据第一版写成了 `IsLocallyControlled()`，结果**单机下所有敌人的
+> 血条都被藏了起来**。原因是这个函数只是转发到
+> `AController::IsLocalController()`，而那个函数（`Controller.cpp:90-113`）：
+>
+>   · Standalone 模式**无脑 return true**
+>   · 本地角色是权威、远端角色不是 `AutonomousProxy` → return true
+>     （注释原文就是 "Local authority in control"）
+>
+> 服务器上的 AIController 两条都沾。所以"本地控制"这个词在引擎里**不等于**
+> "本地玩家控制"，它真正的意思是"这台机器上权威地跑着的控制"。
+>
+> 更阴的是**客户端上判定反而是对的**（复制过去的 AIController 不是权威），
+> 所以这个 bug 只在单机/主机上出现 —— 又是一个"换个模式才暴露"的例子。
+>
+> 正确的判据要加一条 `Controller->IsA<APlayerController>()`。
+
+> 🕳️ **本阶段最险的一个坑：`UWidgetComponent` 造的 Widget 不知道自己属于谁**
+>
+> 头顶血条必须知道"我是谁的血条"。直觉上应该能问出来，但两条路都是断的：
+>
+>   · `GetOwningPlayerPawn()` 返回的是**本地玩家** —— 因为
+>     `UWidgetComponent::InitWidget()` 用 `CreateWidget(World, WidgetClass)` 造 Widget，
+>     那个重载把 PlayerContext 设成了 `GameInstance.GetFirstGamePlayer()`
+>   · `GetTypedOuter<UWidgetComponent>()` 也拿不到 ——
+>     Widget 的 outer 是 **GameInstance**，不是那个组件
+>
+> 后果：**每条敌人的血条都显示玩家自己的血量和名字，而且不报任何错**。
+>
+> 修法是加一个组件子类 `URPG_OverheadHealthBarComponent`，
+> 重写 `InitWidget()`，在 Widget 刚被造出来的那一刻把 owner 显式塞进去。
+> 另有一条同类问题：飘字用 `IsValid()` 判死活也是错的 ——
+> `RemoveFromParent()` 不会让对象失效，而 `UPROPERTY` 数组持的是强引用，
+> 死控件永远清不掉。判据要换成 `IsInViewport()`。
+
+> 💡 **蓄力条为什么不让 GA 直接喂数据**（面试常被追问）
+>
+> GA 里明明有 `ChargeElapsed`，但：① 是 private，UI 要 Cast 到具体 GA 类；
+> ② GA 实例随能力结束被回收，UI 存指针是悬垂；③ 它 0.1 秒才更新一次，画进度条能看出台阶。
+>
+> 改成**标签当节拍器、UI 自己计时**：`State.Attack.Charging` 出现就开始累加、
+> 消失就归零。于是"右键松开后条归零"**一行输入事件都不用订阅** ——
+> 松手、被打断、耐力耗尽强制释放，三种结束路径的共同点都是标签被摘掉。
+> 而**段位仍读权威的 `LvN` 标签**，所以误差最多影响"条过没过刻度线"，
+> 不会出现"UI 说二段、实际打了三段"。
+
+### 阶段 8 · 联机补完 —— ⏳ 下一阶段
+
+这一阶段**不加新玩法**，只把已经写在文档里的联机承诺兑现。
+起因是阶段 6 的独立代码审查发现：项目对外声称的 L2（权威与预测）
+其实有一个洞，而且本机测试**永远测不出来**。
+
+- [ ] **① 修复：客户端无法激活任何输入能力** ★ 最高优先级
+      —— 详见 [§15 已确认待修](#️-已确认待修客户端无法激活输入能力)
+- [ ] **② PIE 双客户端完整验收**
+      —— 目前所有验收标准都是单机跑的，联机路径从来没被真正走过：
+      输入激活 / 伤害结算 / 受击死亡表现 / 布娃娃 / 头顶血条 / 飘字
+- [ ] **③ 检查其余"只在服务器成立"的假设**
+      —— 阶段 6/7 加了不少权威判断（事件广播、NetMulticast、位置同步），
+      它们都是按"服务器产生、客户端消费"写的，但没在两端同时验证过
+- [ ] **④ 把联机调试方法整理成可复用的清单**
+      —— `showdebug abilitysystem`、PIE 双客户端配置、
+      怎么看"单机正常联机才暴露"这类问题的日志
+- [ ] **✅ 验收：两个 PIE 客户端各自都能攻击、挨打、死亡、复活、看到对方头顶血条**
+
+> ⚠️ **为什么它值得单独一个阶段，而不是塞进"打磨"**
+>
+> 因为它的性质不同：打磨是"加新东西"，这一阶段是"兑现已经写在文档里的承诺"。
+> `ARCHITECTURE.md` §1.2 里 L1/L2 标的是 ✅，
+> 而实际上客户端的输入链路是断的 —— **文档说做了、代码没做，比没做更糟**。
+> 这一类必须先还清，否则后面每加一个功能都要在错误的假设上再叠一层。
+
+### 阶段 9 · 打磨与扩展（持续）
+
+- [ ] 受击硬直（hit stun）、受击方向分级（`Payload.EventMagnitude` 已带伤害值）
+- [ ] 尸体清理、死亡掉落、击杀经验
+- [ ] 命中顿帧（HitStop）、镜头震动
+- [ ] 血条残影、伤害暴击分级、技能冷却图标
 - [ ] 三法术（法力消耗 + 投射物 + 范围效果）
 - [ ] **格挡系统**（你提到的下期内容）
 - [ ] 清理模板遗留的 `Variant_*` 代码
@@ -1611,6 +1879,10 @@ Content/RPG/
 | 15 | **谁产生状态，谁消费状态** | 客户端为什么不能自己 `GiveAbility`；"放一次技能触发两遍效果"是怎么来的 |
 | 16 | **预测与权威的边界** | 客户端命中判定只为手感、真实伤害必须来自服务器复制；`LocalPredicted` 的代价与预测失败的处理 |
 | 17 | **联机调试方法** | PIE 双客户端配置；`showdebug abilitysystem` 的用法；"单机正常、联机才暴露"这类 bug 的排查思路 |
+| 18 | **属性驱动 UI** | `GetGameplayAttributeValueChangeDelegate` 的两条触发路径（服务器 GE / 客户端 OnRep）；为什么 Max 变化时也要重画；委托 vs 轮询的取舍 |
+| 19 | **UI 不碰玩法逻辑** | 蓄力条不读 GA 私有成员，改成"标签当节拍器 + UI 自己计时"；段位仍读权威标签，避免 UI 与逻辑不一致 |
+| 20 | **表现类 RPC 的选型** | 飘字为什么用 `NetMulticast Unreliable` 而不是 Reliable，也不是 GameplayEvent；世界坐标 → 屏幕坐标为什么必须由各端自己做 |
+| 21 | **头顶血条的显示判据** | 为什么用 `IsLocallyControlled()` 而不是"是玩家还是敌人"；为什么要在 `BeginPlay`/`PossessedBy`/`OnRep_Controller` 三处刷新 |
 
 > 💡 **用法建议**：面试时不要一口气全讲。挑 2~3 个和岗位最相关的深入讲，其余作为"我还做了这些"的引子。**主动说出取舍和替代方案的缺点**，比只讲自己的实现更有说服力——那说明你是在做工程决策，而不是照抄教程。
 
@@ -1782,6 +2054,20 @@ GAS 的处理方式：
 | 6 | 无敌帧实现 | GE 提供标签（可调试、可扩展） | `AddLooseGameplayTag`（更简单） |
 | 7 | 巡逻点来源 | 关卡内摆 `TargetPoint` 数组 | Spline 巡逻路线 / EQS |
 | 8 | 攻击模组切换 | 运行时切换 DataAsset（预留武器 Actor） | MVP 先固定徒手 |
+
+### ⚠️ 已确认待修：客户端无法激活输入能力
+
+**由阶段 6 的独立代码审查发现（既有缺陷，不是阶段 6 引入的）。**
+
+| 项 | 内容 |
+|---|---|
+| **现象** | 在非服务器的机器上按攻击/闪避键**完全无效**，日志刷 `输入标签 X 没有绑定任何能力` |
+| **根因** | `RPG_Player.cpp` 的 `InitializeAbilitySystem()` 在 `!HasAuthority()` 时提前 return，于是 `RegisterInputAbilities` 只在服务器跑 —— 而 `InputTagToSpecHandle` 正是在那里填充的。`TryActivateAbilityByInputTag` 只查这张表，客户端上它永远是空的 |
+| **为什么不报"功能坏了"** | 能力 Spec 本身**会**复制到客户端（`ActivatableAbilities` 是 `COND_ReplayOrOwner`），所以"能力已经授予"这件事看起来完全正常 —— 断的只是"输入标签 → Handle"这一层索引 |
+| **影响** | 违反"做 L1+L2 联机"这条硬性要求；单机和 Listen Server 主机不受影响，所以本地测试很容易漏掉 |
+| **待定修法** | ① 把 `RegisterInputAbilities` 拆成"填映射表"（纯数据，两端都跑）+"授予"（仅服务器）；② 覆写 ASC 的 `OnRep_ActivateAbilities`，在客户端按类反查 Spec 重建 `InputTagToSpecHandle`；③ 或在 `TryActivateAbilityByInputTag` 里加按类扫描 `ActivatableAbilities` 的兜底路径 |
+
+> ⚠️ AI 也走 `TryActivateAbilityByInputTag`，改这个函数必须回归测试敌人攻击。
 
 ---
 

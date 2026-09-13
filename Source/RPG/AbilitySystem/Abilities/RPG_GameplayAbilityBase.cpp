@@ -19,7 +19,7 @@
 URPG_GameplayAbilityBase::URPG_GameplayAbilityBase()
 {
 	// ══════════════════════════════════════════════════════════════════
-	//  实例化策略 —— 必须是 InstancedPerActor
+	//  GA实例化策略 —— 必须是 InstancedPerActor
 	// ══════════════════════════════════════════════════════════════════
 	// ⚠️ UE 5.8 的 UGameplayAbility 构造函数把默认值设成了
 	// InstancedPerExecution（见 GameplayAbility.cpp:102），这对我们**完全不适用**。
@@ -43,7 +43,7 @@ URPG_GameplayAbilityBase::URPG_GameplayAbilityBase()
 	// ══════════════════════════════════════════════════════════════════
 	//  联机策略默认值
 	// ══════════════════════════════════════════════════════════════════
-	// LocalPredicted：客户端按下按键后**立刻在本地执行**，不等服务器往返。
+	// LocalPredicted（本地预测）：客户端按下按键后**立刻在本地执行**，不等服务器往返。
 	// 这是动作游戏手感的前提 —— 攻击、闪避如果等一个 RTT 才响应，
 	// 玩家的感受就是"按键延迟很高"。
 	//
@@ -160,7 +160,8 @@ URPG_AttackModuleData* URPG_GameplayAbilityBase::GetAttackModule() const
 
 UAbilityTask_PlayMontageAndWait* URPG_GameplayAbilityBase::PlayMontageOrSkip(
 	UAnimMontage* Montage,
-	FName TaskName)
+	FName TaskName,
+	float Rate)
 {
 	if (!Montage)
 	{
@@ -173,7 +174,7 @@ UAbilityTask_PlayMontageAndWait* URPG_GameplayAbilityBase::PlayMontageOrSkip(
 	}
 
 	// ══════════════════════════════════════════════════════════════════
-	//  混合时间体检 ★
+	//  混合时间的体检 ★
 	// ══════════════════════════════════════════════════════════════════
 	// 新建的蒙太奇，Blend In / Blend Out 默认各是 **0.25 秒**
 	// （UAnimMontage 构造函数，AnimMontage.cpp:76-77）。
@@ -214,9 +215,9 @@ UAbilityTask_PlayMontageAndWait* URPG_GameplayAbilityBase::PlayMontageOrSkip(
 			this,
 			TaskName,
 			Montage,
-			/*Rate*/ 1.f,
-			/*StartSection*/ NAME_None,
-			/*bStopWhenAbilityEnds*/ true);
+			Rate,
+			NAME_None,
+			true);
 
 	return Task;
 }
@@ -226,10 +227,7 @@ void URPG_GameplayAbilityBase::ApplyDamageToTarget(
 	float DamageMultiplier,
 	const FHitResult* HitResult)
 {
-	if (!Target)
-	{
-		return;
-	}
+	if (!Target) return;
 
 	if (!DamageEffectClass)
 	{
@@ -239,13 +237,11 @@ void URPG_GameplayAbilityBase::ApplyDamageToTarget(
 	}
 
 	UAbilitySystemComponent* SourceASC = GetAbilitySystemComponentFromActorInfo();
-	UAbilitySystemComponent* TargetASC =
-		UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Target);
+	UAbilitySystemComponent* TargetASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Target);
 
 	if (!SourceASC || !TargetASC)
 	{
-		UE_LOG(LogRPG_Ability, Verbose,
-			TEXT("[%s] 伤害施加失败：源或目标的 ASC 为空"), *GetName());
+		UE_LOG(LogRPG_Ability,Verbose,TEXT("[%s] 伤害施加失败：源或目标的 ASC 为空"),*GetName());
 		return;
 	}
 
@@ -260,8 +256,7 @@ void URPG_GameplayAbilityBase::ApplyDamageToTarget(
 		Context.AddHitResult(*HitResult);
 	}
 
-	const FGameplayEffectSpecHandle SpecHandle =
-		SourceASC->MakeOutgoingSpec(DamageEffectClass, GetAbilityLevel(), Context);
+	const FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(DamageEffectClass, GetAbilityLevel(), Context);
 
 	if (!SpecHandle.IsValid())
 	{
@@ -284,10 +279,7 @@ void URPG_GameplayAbilityBase::ApplyDamageToTarget(
 
 void URPG_GameplayAbilityBase::ConsumeStamina(float Amount)
 {
-	if (Amount <= 0.f)
-	{
-		return;
-	}
+	if (Amount <= 0.f) return;
 
 	if (!StaminaCostEffectClass)
 	{
@@ -297,21 +289,13 @@ void URPG_GameplayAbilityBase::ConsumeStamina(float Amount)
 	}
 
 	UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo();
-	if (!ASC)
-	{
-		return;
-	}
+	if (!ASC) return;
 
 	FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
 	Context.AddSourceObject(this);
+	const FGameplayEffectSpecHandle SpecHandle = ASC->MakeOutgoingSpec(StaminaCostEffectClass, GetAbilityLevel(), Context);
 
-	const FGameplayEffectSpecHandle SpecHandle =
-		ASC->MakeOutgoingSpec(StaminaCostEffectClass, GetAbilityLevel(), Context);
-
-	if (!SpecHandle.IsValid())
-	{
-		return;
-	}
+	if (!SpecHandle.IsValid()) return;
 
 	// ⚠️ 必须传**负数**。
 	// GE_StaminaCost 的 Modifier Op 是 Additive，SetByCaller 的值会被直接加到
@@ -320,23 +304,21 @@ void URPG_GameplayAbilityBase::ConsumeStamina(float Amount)
 	// 用 -FMath::Abs() 而不是 -Amount，是为了防止调用方不小心传了负数进来
 	// 变成"负负得正"。
 	SpecHandle.Data->SetSetByCallerMagnitude(RPGTags::Data_Stamina_Cost, -FMath::Abs(Amount));
-
 	ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
 
 	// ══════════════════════════════════════════════════════════════════
 	//  刷新"恢复阻断"
 	// ══════════════════════════════════════════════════════════════════
-	// 每消耗一次耐力就重新挂一次阻断 GE。因为它是"刷新持续时间"式的堆叠，
+	// 【每消耗一次耐力】就【重新挂一次阻断 GE】。因为它是"刷新持续时间"式的堆叠，
 	// 连续消耗会把阻断时间不断往后推 —— 这正是我们想要的：
-	// 只要玩家还在动作，耐力就不会恢复。
+	// 只要玩家还在动作，耐力就不会恢复。（类似【暗区突围】的耐力恢复）
 	//
 	// 恢复侧（GE_StaminaRegen）通过 OngoingTagRequirements 检查
 	// State.Stamina.Blocked 来决定是否生效，所以这条链路里
 	// **没有任何计时代码** —— 时间纯粹由 GE 的 Duration 表达。
 	if (StaminaRegenDelayEffectClass)
 	{
-		const FGameplayEffectSpecHandle DelaySpecHandle =
-			ASC->MakeOutgoingSpec(StaminaRegenDelayEffectClass, GetAbilityLevel(), Context);
+		const FGameplayEffectSpecHandle DelaySpecHandle = ASC->MakeOutgoingSpec(StaminaRegenDelayEffectClass, GetAbilityLevel(), Context);
 
 		if (DelaySpecHandle.IsValid())
 		{
@@ -344,8 +326,7 @@ void URPG_GameplayAbilityBase::ConsumeStamina(float Amount)
 		}
 	}
 
-	UE_LOG(LogRPG_Combat, Verbose,
-		TEXT("[%s] 消耗耐力 %.1f"), *GetNameSafe(GetAvatarActorFromActorInfo()), Amount);
+	UE_LOG(LogRPG_Combat,Verbose,TEXT("[%s] 消耗耐力 %.1f"),*GetNameSafe(GetAvatarActorFromActorInfo()), Amount);
 }
 
 void URPG_GameplayAbilityBase::PerformSimulatedMeleeHit(
@@ -356,10 +337,7 @@ void URPG_GameplayAbilityBase::PerformSimulatedMeleeHit(
 	AActor* Avatar = GetAvatarActorFromActorInfo();
 	UWorld* World = Avatar ? Avatar->GetWorld() : nullptr;
 
-	if (!Avatar || !World)
-	{
-		return;
-	}
+	if (!Avatar || !World) return;
 
 	const FVector Origin = Avatar->GetActorLocation()
 		+ Avatar->GetActorForwardVector() * ForwardOffset;
