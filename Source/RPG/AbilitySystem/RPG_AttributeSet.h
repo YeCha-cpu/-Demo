@@ -76,13 +76,25 @@ public:
 	 * ══════════════════════════════════════════════════════════════════
 	 * 只重写 PreAttributeChange 是**拦不住 GE 的**。
 	 *
-	 * 引擎里这两条路是分开的：
-	 *   · 直接赋值      → SetNumericValueChecked → PreAttributeChange
-	 *   · GE 的 Modifier → SetAttributeBaseValue → **PreAttributeBaseChange**
+	 * ⚠️ 这两条路的区别是**时序，不是"走不走"** —— 这是最容易搞错的一点。
 	 *
-	 * 整个 GAS 插件里 `PreAttributeChange` 只有两处调用点，都在
-	 * AttributeSet.cpp 的属性拷贝函数里；而 GE 施加 Modifier 走的是
-	 * GameplayEffect.cpp:4001 的这条。引擎自己的注释也写明了这一点：
+	 *   · 直接赋值      → `SetNumericValueChecked` → `PreAttributeChange`
+	 *   · GE 的 Modifier → **先把 BaseValue 写进去**（`SetAttributeBaseValue`，
+	 *                     有聚合器时是 `Aggregator->SetBaseValue`），
+	 *                     **之后**才由 `SetNumericValueChecked` 调到 `PreAttributeChange`
+	 *
+	 * 也就是说：**GE 的 Modifier 是会经过 `PreAttributeChange` 的。**
+	 * 整个 GAS 插件里 `PreAttributeChange` 只有两处调用点
+	 * （`AttributeSet.cpp:82` / `:95`），它们都在
+	 * `FGameplayAttribute::SetNumericValueChecked`（`AttributeSet.cpp:72-106`）里 ——
+	 * 那是写属性值的**通用 setter**，GE 路径最终同样会走到它。
+	 *
+	 * 真正的差别在时序：轮到 `PreAttributeChange` 执行时，
+	 * **BaseValue 已经落盘了**，它只能纠正 CurrentValue，纠正不了 BaseValue。
+	 *
+	 * 所以结论不变（两个都要写），但理由要换成上面这个：
+	 * `PreAttributeBaseChange` 管住 BaseValue，`PreAttributeChange` 管住
+	 * CurrentValue 与直接赋值路径。引擎自己的注释也是这个意思：
 	 *
 	 *   "This function should enforce clamping (presuming you wish to clamp
 	 *    the base value **along with** the final value in PreAttributeChange)"

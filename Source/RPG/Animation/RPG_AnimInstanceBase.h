@@ -204,8 +204,21 @@ protected:
 		/** 开始播放的世界时间（秒） */
 		float StartTime = 0.f;
 
-		/** 蒙太奇全长（秒） */
+		/** 蒙太奇全长（**蒙太奇秒**，不是墙钟秒） */
 		float Length = 0.f;
+
+		/**
+		 * 播放速率。
+		 *
+		 * ⚠️ 必须记下来，否则判据在 `Rate != 1` 时全是假警报。
+		 *
+		 * `PlayedFor` 是**墙钟时间**，`Length` 是**蒙太奇秒**，两者只在 Rate == 1
+		 * 时可以直接比。角色上配了 `HitReactPlayRate` / `DeathMontagePlayRate`
+		 * （`RPG_GA_HitReact.cpp` / `RPG_GA_Death.cpp` 会把它传给 PlayMontageOrSkip）
+		 * 的时候，全长 1.77s 的死亡动画实际 0.88s 播完是**完全正常**的 ——
+		 * 不记 Rate 的话会把每一次正常播完都报成"被提前结束 50%"。
+		 */
+		float PlayRate = 1.f;
 	};
 
 	/** 蒙太奇开始播放。按蒙太奇登记一条记录 */
@@ -220,8 +233,42 @@ protected:
 	UFUNCTION()
 	void HandleMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
-	/** 正在播放中的蒙太奇记录。键是弱引用，蒙太奇被卸载时条目会自然失效 */
-	TMap<TWeakObjectPtr<UAnimMontage>, FMontagePlayRecord> MontagePlayRecords;
+	/**
+	 * 正在播放中的蒙太奇记录。
+	 *
+	 * ⚠️ 值是**数组**，不是单条 —— 同一份蒙太奇资产可以同时/连续有多个实例。
+	 *
+	 * 只按"资产"存一条是不够的：受击蒙太奇池里只有一两个资产时，
+	 * 很容易连续两次取到同一个（`ARPG_BaseCharacter::PickHitReactMontage()` 是随机取）。
+	 * `Montage_Play` 的顺序是"先停同组旧蒙太奇 → 建新实例 → 广播 OnMontageStarted"，
+	 * 于是旧实例的 `OnMontageEnded` 会在 `FindOrAdd` **覆盖过记录之后**才到 ——
+	 * 拿到的 StartTime 是新实例的，算出来就是"实播 0.02s"。
+	 *
+	 * 也就是说：按资产存单条时，被吐槽的"实播 0.02s / 全长 0.00s"只是
+	 * **换了个入口重新出现**。用数组 + `Ended` 时取**最早一条**（FIFO）才对得上：
+	 * 旧实例先结束、配对最早的记录。
+	 *
+	 * 键是弱引用，蒙太奇被卸载后键会失效，但**条目不会自动清掉** ——
+	 * 会残留的路径只有"UninitializeAnimation 直接删实例、不广播 Ended"，
+	 * 残留量 = 每次反初始化时活着的蒙太奇数，且同一资产再播时会追加，
+	 * 不构成增长风险（`NativeUninitializeAnimation` 里会整个清空）。
+	 */
+	TMap<TWeakObjectPtr<UAnimMontage>, TArray<FMontagePlayRecord>> MontagePlayRecords;
+
+	/**
+	 * 反初始化：解绑委托 + 清空记录。
+	 *
+	 * ⚠️ 必须成对解绑。`UAnimInstance::InitializeAnimation()` 的第一句就是
+	 * `UninitializeAnimation()`，而**同一个实例可以被重复初始化** ——
+	 * `USkeletalMeshComponent::InitializeAnimScriptInstance()` 在
+	 * "实例已存在且类相同 + bForceReinit"时会直接对现有实例再调一次
+	 * （`SkeletalMeshComponent.cpp`），`bForceReinit=true` 来自重新注册路径。
+	 *
+	 * `AddDynamic` **不查重**（`ScriptDelegates.h` 的 `AddInternal` 是无条件
+	 * `InvocationList.Add`，只有 `AddUniqueDynamic` 才查重），所以重入一次就会
+	 * 绑两份：每段蒙太奇打两条日志，`ensure` 在 Development 构建里还会报红。
+	 */
+	virtual void NativeUninitializeAnimation() override;
 
 	/**
 	 * 只有实际播放时长短于这个比例才打 Warning。

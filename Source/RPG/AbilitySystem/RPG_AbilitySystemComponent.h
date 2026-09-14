@@ -31,8 +31,13 @@ class UGameplayAbility;
  * ══════════════════════════════════════════════════════════════════════
  * 【为什么不用引擎自带的 InputID 机制】
  * ══════════════════════════════════════════════════════════════════════
- * UE 5.8 的 FGameplayAbilitySpec 只有 int32 InputID，**没有** FGameplayTag InputTag
- * （早期版本有，后来移除了）。基于 int32 的编号方案有两个问题：
+ * UE 5.8 的 FGameplayAbilitySpec 只有 int32 `InputID`，**没有** `FGameplayTag InputTag`。
+ *
+ * ⚠️ 措辞要准：不是"引擎早期有、后来移除了" —— 引擎**从来没提供过** InputTag 版本。
+ * 网上教程里那种写法来自 Lyra 自己的 `FLyraAbilitySet_GameplayAbility`，
+ * 那是示例项目的扩展，不是引擎接口。
+ *
+ * 基于 int32 的编号方案有两个问题：
  *   · 编号和能力的对应关系藏在配置里，加一个技能要小心不要撞号
  *   · 调试时日志里只有 "InputID 3"，看不出是什么
  * 用 GameplayTag 则自带语义，日志里直接显示 "Input.Attack.Light"。

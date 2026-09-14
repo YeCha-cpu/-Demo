@@ -30,11 +30,22 @@ void URPG_AnimInstanceBase::NativeInitializeAnimation()
 	Super::NativeInitializeAnimation();
 
 	// ── 挂上蒙太奇生命周期诊断 ──
-	// 这两个委托是**动态多播**，所以用 AddDynamic + UFUNCTION 回调。
-	// 它们覆盖了蒙太奇的**全部**结束路径（自然播完 / 被别的蒙太奇顶掉 /
-	// 能力结束 / 预测被服务器拒绝），所以不需要在 GA 那边再埋点。
-	OnMontageStarted.AddDynamic(this, &URPG_AnimInstanceBase::HandleMontageStarted);
-	OnMontageEnded.AddDynamic(this, &URPG_AnimInstanceBase::HandleMontageEnded);
+	// 这两个委托是**动态多播**，所以用 AddUniqueDynamic + UFUNCTION 回调。
+	// 它们覆盖了蒙太奇的主要结束路径（自然播完 / 被别的蒙太奇顶掉 / 能力结束），
+	// 所以不需要在 GA 那边再埋点。
+	//
+	// ⚠️ 必须用 `AddUniqueDynamic` 而不是 `AddDynamic`。
+	// `AddDynamic` **不查重** —— 它展开成 `AddInternal`，实现是无条件
+	// `InvocationList.Add(...)`（ScriptDelegates.h），只在 `DO_ENSURE` 构建里
+	// 先 `ensure` 一下。而 `UAnimInstance::InitializeAnimation()` 第一句就是
+	// `UninitializeAnimation()`，且**同一个实例可以被重复初始化**
+	// （`USkeletalMeshComponent::InitializeAnimScriptInstance()` 在
+	//  "实例已存在 + bForceReinit" 时直接对现有实例再调一次，bForceReinit 来自重新注册）。
+	//
+	// 一旦重入：两个回调各绑两份 → 每段蒙太奇打两条日志、ensure 报红，
+	// 而日志的"实播"数字会被第二条 `-1.00s` 污染，正好把诊断本身弄坏。
+	OnMontageStarted.AddUniqueDynamic(this, &URPG_AnimInstanceBase::HandleMontageStarted);
+	OnMontageEnded.AddUniqueDynamic(this, &URPG_AnimInstanceBase::HandleMontageEnded);
 
 	// 这时角色可能还没 Possess 完 / 还没 BeginPlay，
 	// 拿不到也不报错 —— NativeUpdateAnimation 每帧都会再试一次。
@@ -67,11 +78,21 @@ void URPG_AnimInstanceBase::HandleMontageStarted(UAnimMontage* Montage)
 		return;
 	}
 
+	// 记下播放速率 —— 判据要用它把"蒙太奇秒"换算成"墙钟秒"。
+	// `OnMontageStarted` 是在实例建好之后才广播的，所以这里能取到实例。
+	// 取不到就按 1.0 算（保守：只会让判据更严格，不会漏报）。
+	float PlayRate = 1.f;
+	if (const FAnimMontageInstance* Instance = GetActiveInstanceForMontage(Montage))
+	{
+		PlayRate = Instance->GetPlayRate();
+	}
+
 	// 按蒙太奇登记一条独立记录 —— 不能只存"当前那一个"，
-	// 连段切段时两段会在同一帧重叠（见头文件里的说明）。
-	FMontagePlayRecord& Record = MontagePlayRecords.FindOrAdd(Montage);
+	// 连段切段时两段会在同一帧重叠；同一资产也可能有多个实例（见头文件里的说明）。
+	FMontagePlayRecord& Record = MontagePlayRecords.FindOrAdd(Montage).AddDefaulted_GetRef();
 	Record.StartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
 	Record.Length = Montage->GetPlayLength();
+	Record.PlayRate = PlayRate;
 
 	// 用 Verbose：一次攻击会打好几条，正常游戏时没必要刷屏。
 	// 排查手感问题时 `Log LogRPG_Animation Verbose` 打开即可。
@@ -86,14 +107,41 @@ void URPG_AnimInstanceBase::HandleMontageEnded(UAnimMontage* Montage, bool bInte
 		return;
 	}
 
-	// 取出这条蒙太奇**自己**的记录。取不到说明我们没见到它的开始
-	// （比如它在本 AnimInstance 初始化之前就在播了）——
+	// 取**最早**的一条记录（FIFO），而不是随便一条。
+	//
+	// 同一份资产可能同时/连续有多个实例（受击蒙太奇池小的时候很容易连取两次同一个）。
+	// `Montage_Play` 的顺序是"先停同组旧的 → 建新实例 → 广播 Started"，
+	// 所以旧实例的 Ended 一定**先**到，它要配的就是最早那条记录。
+	// 取最新那条的话算出来会是"实播 0.02s" —— 正是这个诊断工具当初要消灭的东西。
+	//
+	// 取不到说明我们没见到它的开始（比如它在本 AnimInstance 初始化之前就在播了）——
 	// 这种情况下老实说"没记录到"，而不是拿别人的数字硬凑。
 	FMontagePlayRecord Record;
-	const bool bHasRecord = MontagePlayRecords.RemoveAndCopyValue(Montage, Record);
+	bool bHasRecord = false;
+
+	if (TArray<FMontagePlayRecord>* Records = MontagePlayRecords.Find(Montage))
+	{
+		if (Records->Num() > 0)
+		{
+			Record = (*Records)[0];
+			Records->RemoveAt(0);
+			bHasRecord = true;
+		}
+		if (Records->Num() == 0)
+		{
+			MontagePlayRecords.Remove(Montage);
+		}
+	}
 
 	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
 	const float PlayedFor = bHasRecord ? (Now - Record.StartTime) : -1.f;
+
+	// 把"蒙太奇秒"换算成"墙钟秒"再比 —— 否则配了播放速率就全是假警报。
+	// 例：全长 1.77s、Rate = 2.0 → 正常播完就是 0.885s 墙钟，
+	// 拿 1.77 当基准会把每一次正常播完都报成"被提前结束 50%"。
+	const float ExpectedWallClock = bHasRecord
+		? Record.Length / FMath::Max(Record.PlayRate, KINDA_SMALL_NUMBER)
+		: 0.f;
 
 	// ══════════════════════════════════════════════════════════════════
 	//  ★ 这一条是给"出招动画有顿挫感"准备的
@@ -120,17 +168,24 @@ void URPG_AnimInstanceBase::HandleMontageEnded(UAnimMontage* Montage, bool bInte
 	//  就是这么来的：**假警报**，把真正的问题淹掉了。
 	//
 	//  所以判据是"**实际播的时长明显短于全长**"，bInterrupted 只作为补充说明。
-	const bool bPlayedMostOfIt = bHasRecord && Record.Length > KINDA_SMALL_NUMBER
-		&& PlayedFor >= Record.Length * MontageCutShortWarnRatio;
+	const bool bPlayedMostOfIt = bHasRecord && ExpectedWallClock > KINDA_SMALL_NUMBER
+		&& PlayedFor >= ExpectedWallClock * MontageCutShortWarnRatio;
 	const bool bCutShort = bHasRecord && !bPlayedMostOfIt;
+
+	// 配了播放速率时把全长和速率一起打出来 —— 否则看到
+	// "实播 0.88s / 应播 0.88s"会不知道为什么和蒙太奇全长对不上。
+	const FString RateNote = (bHasRecord && !FMath::IsNearlyEqual(Record.PlayRate, 1.f))
+		? FString::Printf(TEXT("（全长 %.2fs @ Rate %.2f）"), Record.Length, Record.PlayRate)
+		: FString();
 
 	if (bCutShort)
 	{
 		UE_LOG(LogRPG_Animation, Warning,
-			TEXT("[%s] 蒙太奇被提前结束：%s —— 实播 %.2fs / 全长 %.2fs（%.0f%%），bInterrupted=%s"),
+			TEXT("[%s] 蒙太奇被提前结束：%s —— 实播 %.2fs / 应播 %.2fs（%.0f%%）%s，bInterrupted=%s"),
 			*GetNameSafe(GetOwningActor()), *Montage->GetName(),
-			PlayedFor, Record.Length,
-			Record.Length > KINDA_SMALL_NUMBER ? (PlayedFor / Record.Length * 100.f) : 0.f,
+			PlayedFor, ExpectedWallClock,
+			ExpectedWallClock > KINDA_SMALL_NUMBER ? (PlayedFor / ExpectedWallClock * 100.f) : 0.f,
+			*RateNote,
 			bInterrupted ? TEXT("true") : TEXT("false"));
 
 		// 想知道"是谁停的"就把这个 CVar 打开：
@@ -146,11 +201,33 @@ void URPG_AnimInstanceBase::HandleMontageEnded(UAnimMontage* Montage, bool bInte
 		//   · 自然播完
 		//   · 播完了，随后被"能力结束"顺手停掉（引擎仍报 bInterrupted=true）
 		UE_LOG(LogRPG_Animation, Verbose,
-			TEXT("[%s] 蒙太奇结束：%s（实播 %.2fs / 全长 %.2fs，bInterrupted=%s）"),
+			TEXT("[%s] 蒙太奇结束：%s（实播 %.2fs / 应播 %.2fs%s，bInterrupted=%s）"),
 			*GetNameSafe(GetOwningActor()), *Montage->GetName(),
-			bHasRecord ? PlayedFor : -1.f, bHasRecord ? Record.Length : -1.f,
+			bHasRecord ? PlayedFor : -1.f, bHasRecord ? ExpectedWallClock : -1.f,
+			*RateNote,
 			bInterrupted ? TEXT("true") : TEXT("false"));
 	}
+}
+
+void URPG_AnimInstanceBase::NativeUninitializeAnimation()
+{
+	// 解绑必须成对 —— 理由见头文件（InitializeAnimation 会重入，且 AddDynamic 不查重）。
+	// 用 RemoveDynamic 而不是 RemoveAll：后者会把将来可能加的别的监听者一起误伤。
+	if (OnMontageStarted.IsAlreadyBound(this, &URPG_AnimInstanceBase::HandleMontageStarted))
+	{
+		OnMontageStarted.RemoveDynamic(this, &URPG_AnimInstanceBase::HandleMontageStarted);
+	}
+	if (OnMontageEnded.IsAlreadyBound(this, &URPG_AnimInstanceBase::HandleMontageEnded))
+	{
+		OnMontageEnded.RemoveDynamic(this, &URPG_AnimInstanceBase::HandleMontageEnded);
+	}
+
+	// 记录也一起清掉。
+	// 不清的话，反初始化时活着的那些蒙太奇（UninitializeAnimation 是直接删实例、
+	// **不广播 Ended** 的）会留下永远配不上对儿的陈旧条目。
+	MontagePlayRecords.Empty();
+
+	Super::NativeUninitializeAnimation();
 }
 
 void URPG_AnimInstanceBase::NativeUpdateAnimation(float DeltaSeconds)

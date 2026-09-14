@@ -43,9 +43,9 @@ void URPG_AttributeSet::PreAttributeBaseChange(const FGameplayAttribute& Attribu
 {
 	Super::PreAttributeBaseChange(Attribute, NewValue);
 
-	// ★ 这里才是 GE 修改必经的那道关。
-	// 只写 PreAttributeChange 拦不住 GE —— 详见头文件里的说明。
-	//
+	// ★ 这一道管的是 **BaseValue**，而 GE 的 Modifier 是先写 BaseValue 的，
+	// 所以少了它 BaseValue 就会漂到 [0, Max] 外面去 —— 详见头文件里的时序说明。
+	// （⚠️ 不是"GE 不走 PreAttributeChange"：它走，只是轮到它时 BaseValue 已经落盘了。）
 	// 和 PreAttributeChange 共用同一套规则，保证
 	// "直接赋值"和"GE 修改"两条路径的结果必然一致。
 	const float Requested = NewValue;
@@ -124,9 +124,14 @@ void URPG_AttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallba
 	// 而且**不报任何错**。下面统一在这里解析一次，后面的代码都用 AvatarActor，
 	// 免得每处各写各的再漏一个。
 	//
-	// `Data.Target` 是 UAbilitySystemComponent&（GameplayEffectExtension.h:18-28），
-	// **不是** FGameplayAbilityActorInfo，所以没有 Data.Target.AvatarActor 那种写法，
-	// 要走 ASC 的 GetAvatarActor()（AbilitySystemComponent.h:1529）。
+	// `Data.Target` 是 UAbilitySystemComponent&（GameplayEffectExtension.h:17-30，
+	// Target 是第 29 行），**不是** FGameplayAbilityActorInfo，所以没有
+	// Data.Target.AvatarActor 那种写法，要走 ASC 的 GetAvatarActor()。
+	//
+	// ⚠️ `GetAvatarActor()` 内部第一句是 `check(AbilityActorInfo.IsValid())`
+	// （AbilitySystemComponent.cpp:2184-2188）—— AbilityActorInfo 无效时它
+	// **直接断言/崩**，而不是返回 null；只有 Avatar 弱指针本身为空时才返回 null。
+	// 所以下面那个兜底分支覆盖的是后者，不是前者。
 	AActor* AvatarActor = Data.Target.GetAvatarActor();
 	if (!AvatarActor)
 	{
@@ -159,10 +164,15 @@ void URPG_AttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallba
 	// 而这时候血量已经是 0，下面两条分支会走到"受击"那一条（因为
 	// 死亡判定的条件是"从有血变成没血"，这次不满足）。
 	//
-	// 后果是：每一刀都广播一次 Event.Combat.Hit → GA_HitReact 尝试激活
+	// 后果是：每一刀都广播一次 **Event.Combat.Death** → GA_Death 尝试激活
 	// → 被 ActivationBlockedTags 里的 State.Dead 挡住 → 引擎通过
 	// AbilityFailedCallbacks 报一条 Warning（见 URPG_AbilitySystemComponent）。
 	// 表现是**打尸体时日志刷屏**，而且会掩盖真正有用的告警。
+	//
+	// ⚠️ 注意走的是**死亡**分支不是受击分支 —— 死亡判据是 `NewHealth <= 0`，
+	// 而尸体挨打时 NewHealth 恒为 0，判据是**成立**的。
+	// "从活到死只触发一次"这件事正是**由下面这道早退创造出来的**，
+	// 不是它本来就成立 —— 把因果关系写反了会让人以为"删掉早退最多误报受击"。
 	//
 	// 从语义上讲这也更对："受击"是活人才有的反应。
 	if (OldHealth <= 0.f)

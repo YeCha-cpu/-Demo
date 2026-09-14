@@ -201,6 +201,20 @@ void ARPG_BaseCharacter::RefreshOverheadWidgetVisibility()
 	//   服务器上的 AIController 正好满足第二条（它是权威，且不是谁的
 	//   AutonomousProxy）。Standalone 下连第一条都直接命中。
 	//
+	//   ⚠️ 上面这段只适用于 **AI** —— `AAIController` 没有重写
+	//   `IsLocalController()`，走的就是基类实现。
+	//   **玩家**的控制器走的是另一套：`APlayerController` 重写了它
+	//   （PlayerController.cpp:304-352），规则完全不同
+	//   （`NM_Client || NM_Standalone` 下无条件 true、`bIsLocalPlayerController`
+	//   快速通道等）。本函数对玩家的结论之所以成立，靠的是别的前提：
+	//     · 服务器上远端玩家的 PC，`bIsLocalPlayerController` 只在
+	//       Role == ROLE_SimulatedProxy 时才置位（GameModeBase.cpp:760-764）
+	//     · 客户端**根本收不到**别人的 PC —— `AController` 构造函数里
+	//       `bOnlyRelevantToOwner = true`（Controller.cpp:67）+
+	//       `AActor::IsNetRelevantFor`（Actor.cpp:398-401）
+	//   所以"客户端上只有自己一个 PC"这个前提一旦被打破
+	//   （旁观者流程、L3 联机），这里会**静默**把别人挨打的表现一起吞掉。
+	//
 	//   结果：拿 IsLocallyControlled() 当判据，**所有敌人在单机下都会被判定成
 	//   "本地玩家"，血条全被藏起来**。而且它在客户端上是对的（客户端上
 	//   复制过来的 AIController 不是权威），所以这个 bug 只在单机/主机上出现。

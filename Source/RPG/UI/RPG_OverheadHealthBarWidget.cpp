@@ -84,6 +84,19 @@ void URPG_OverheadHealthBarWidget::NativeConstruct()
 	// 常规状态不显示 —— 详见头文件里"挨打才亮"的说明。
 	SetVisibility(ESlateVisibility::Collapsed);
 
+	// ★ `NativeConstruct` 是**会跑第二遍**的，不是"每个 Widget 只跑一次"。
+	//
+	// 组件不可见时 `UWidgetComponent::UpdateWidget()` 会
+	// `RemoveWidgetFromScreen()` → Slate 对象析构 → `NativeDestruct()`；
+	// 恢复可见时重新 `TakeWidget()` → 控件被**重建** → 再跑一次
+	// `NativePreConstruct` + `NativeConstruct`（Widget.cpp 的 OnWidgetRebuild 路径）。
+	//
+	// 所以这里必须把血量基线清掉。不清的话：组件隐藏期间血量掉了，
+	// 重建时 `RefreshBarValues` 拿旧基线和当前血量一比 → 判成"掉血了" →
+	// 血条**凭空亮一下**。
+	// `SetOwningActor` 里对同一类误判是显式防了的，这里原本漏了，两处语义不一致。
+	LastSeenHealth = -1.f;
+
 	// 先刷一次。属性委托只在**变化时**触发，
 	// 而血条出现的那一刻（比如敌人刚进入视野）往往没有变化发生 ——
 	// 不主动读一次的话，满血的敌人挨第一刀时亮出来的会是空条。
@@ -120,10 +133,23 @@ void URPG_OverheadHealthBarWidget::RevealForDamage()
 		return;
 	}
 
+	// ★ 边沿检测：已经亮着就只重置计时，**不重发通知**。
+	//
+	// 少了这道检测，5 秒窗口内每挨一下 `BP_OnRevealChanged(true)` 都会重播一次，
+	// WBP 那边的淡入动画被反复重启 —— 观感是"闪"。
+	// 本文件末尾对 `BP_OnLowHealth` 是特意做了边沿检测的
+	// （注释原话："每帧无脑调的话，WBP 里的闪烁动画会被反复重启 —— 看起来像在抽搐"），
+	// 这里原本漏了同一条纪律。
+	const bool bWasRevealed = (GetVisibility() == ESlateVisibility::HitTestInvisible);
+
 	// HitTestInvisible 而不是 Visible：
 	// 血条是纯展示，不该吃掉鼠标事件（将来加"点击选中敌人"时不希望被它挡住）。
 	SetVisibility(ESlateVisibility::HitTestInvisible);
-	BP_OnRevealChanged(true);
+
+	if (!bWasRevealed)
+	{
+		BP_OnRevealChanged(true);
+	}
 
 	// ⚠️ 用 TimerManager 而不是自己 tick 计时。
 	//
@@ -135,6 +161,16 @@ void URPG_OverheadHealthBarWidget::RevealForDamage()
 	//
 	// 同一个 handle 再 SetTimer 会**替换**掉上一个 ——
 	// 这正是我们要的"连续挨打刷新计时，而不是叠加成 10 秒"。
+	// ⚠️ 时长为 0（或负）时**必须**提前返回，否则血条会亮起来再也不收回。
+	//
+	// `meta = (ClampMin = "0.1")` 只约束编辑器输入框；运行时被设成 0 的话，
+	// `FTimerManager::InternalSetTimer` 在 `InRate > 0.f` 为假时
+	// **只清掉旧定时器、不建新的**（TimerManager.cpp），于是 HideAfterDamage 永不触发。
+	if (RevealDuration <= 0.f)
+	{
+		return;
+	}
+
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(
@@ -197,7 +233,7 @@ void URPG_OverheadHealthBarWidget::TryBindToOwnerASC()
 	UAbilitySystemComponent* ASC = ResolveOwnerASC();
 
 	// ══════════════════════════════════════════════════════════════════
-	//  情形 1：ASC 还没就位 —— 挂上重试，等它出现 ★
+	//  情形 1：还没就位 —— 挂上重试，等它出现 ★
 	// ══════════════════════════════════════════════════════════════════
 	// ⚠️⚠️ 这一段**必须**排在下面"主人没变就直接返回"的**前面**。顺序反了就是 bug。
 	//
@@ -214,8 +250,36 @@ void URPG_OverheadHealthBarWidget::TryBindToOwnerASC()
 	//
 	// 教训：**用一个条件同时表达两种状态时，先问"它们在初始值上会不会撞车"。**
 	// null == null 这种撞车在指针判等里是最常见的一种。
-	if (!ASC)
+	//
+	// ── 就位判定：ASC 和属性集**都**要有 ──
+	//
+	// ⚠️ 只判 ASC 是不够的。敌人的 ASC 是 CreateDefaultSubobject 建的，
+	// 组件 BeginPlay 那一刻就已经存在；但它的**属性集**是在
+	// ARPG_Enemy::InitializeAbilitySystem() 里才 AddSpawnedAttribute 的，
+	// 而那要等角色的 BeginPlay —— **在组件 BeginPlay 之后**。
+	//
+	// 所以"ASC 在、属性集还没登记"是**每个敌人必经的中间态**，不是故障。
+	// （上一版在这里直接判"订上了但没属性集"并打 Warning，结果是每刷一个敌人
+	//   就报一次"属性集没复制过来" —— 内容还是错的，非常误导。）
+	const URPG_AttributeSet* ReadySet = ASC ? ASC->GetSet<URPG_AttributeSet>() : nullptr;
+
+	if (!ASC || !ReadySet)
 	{
+		++BindAttemptCount;
+
+		// 试了足够多次**仍然**只有 ASC、没有属性集 → 这才是真故障。
+		// 用"重试次数"而不是"是否为空"来判定，就是为了把上面那个
+		// 必经的中间态和真故障分开。
+		if (ASC && BindAttemptCount == AttributeSetWarnAfterAttempts)
+		{
+			UE_LOG(LogRPG_Combat, Warning,
+				TEXT("[%s] 头顶血条：ASC（%s，挂在 %s 上）已就位 %d 次重试后**仍然拿不到 URPG_AttributeSet** —— "
+				     "血条会一直是空的、挨打也不会亮。检查 %s 上的 AddSpawnedAttribute "
+				     "和 SpawnedAttributes 的复制"),
+				*GetNameSafe(OwningActor.Get()), *ASC->GetName(), *GetNameSafe(ASC->GetOwnerActor()),
+				BindAttemptCount, *GetNameSafe(ASC->GetOwnerActor()));
+		}
+
 		if (World && !World->GetTimerManager().IsTimerActive(BindRetryHandle))
 		{
 			World->GetTimerManager().SetTimer(
@@ -282,39 +346,14 @@ void URPG_OverheadHealthBarWidget::TryBindToOwnerASC()
 	{
 		World->GetTimerManager().ClearTimer(BindRetryHandle);
 	}
+	BindAttemptCount = 0;
 
-	// ══════════════════════════════════════════════════════════════════
-	//  接上之后立刻自检：属性集到底在不在？★
-	// ══════════════════════════════════════════════════════════════════
-	// "ASC 拿到了，但里面没有 URPG_AttributeSet"是一种**完全不报错**的失败：
-	//   · 订阅会成功（句柄有效）
-	//   · 但 RefreshBarValues 每次都因为 AttributeSet 为空而提前返回
-	//   · 表现是**血条永远空的、挨打也永远不亮** —— 和"没订阅上"一模一样
-	//
-	// 而它的成因和订阅毫无关系：属性集是**独立的子对象**，
-	// 服务器和客户端各构造一份，靠 `ReplicateSubobjects` 把服务器的
-	// 那份映射过来（`AbilitySystemComponent.cpp:1940-1946`，无条件、不分模式）。
-	// 这条映射要是没建立起来，ASC 本身照样正常 —— 所以光看 ASC 判断不出来。
-	//
-	// 敌人（ASC 在角色身上）和玩家（ASC 在 PlayerState 上）走的是**两套**
-	// 子对象复制路径，出问题的可能性也不是均等的，所以这条日志要打全：
-	// 主人是谁、ASC 挂在谁身上、属性集在不在。
-	if (ASC->GetSet<URPG_AttributeSet>())
-	{
-		UE_LOG(LogRPG_Combat, Log,
-			TEXT("[%s] 头顶血条已接上 ASC（ASC 在 %s 上），当前血量 %.1f"),
-			*GetNameSafe(OwningActor.Get()), *GetNameSafe(ASC->GetOwnerActor()),
-			ASC->GetSet<URPG_AttributeSet>()->GetHealth());
-	}
-	else
-	{
-		UE_LOG(LogRPG_Combat, Warning,
-			TEXT("[%s] 头顶血条订上了 ASC（%s，挂在 %s 上）但里面**没有 URPG_AttributeSet** —— "
-			     "血条会一直是空的、挨打也不会亮。属性集没复制过来，"
-			     "检查 %s 上的 AddSpawnedAttribute 和 SpawnedAttributes 的复制"),
-			*GetNameSafe(OwningActor.Get()), *ASC->GetName(), *GetNameSafe(ASC->GetOwnerActor()),
-			*GetNameSafe(ASC->GetOwnerActor()));
-	}
+	// 走到这里 ASC 和属性集**都**有了（"情形 1"已经把缺任何一个的挡在外面），
+	// 所以这条日志是真的"链路通了"，可以直接拿它和游戏里的血量对数。
+	UE_LOG(LogRPG_Combat, Log,
+		TEXT("[%s] 头顶血条已接上（ASC 在 %s 上），当前血量 %.1f"),
+		*GetNameSafe(OwningActor.Get()), *GetNameSafe(ASC->GetOwnerActor()),
+		ReadySet->GetHealth());
 
 	// 刚接上，立刻读一次当前值
 	RefreshFromOwner();

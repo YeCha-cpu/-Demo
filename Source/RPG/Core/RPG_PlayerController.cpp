@@ -360,8 +360,46 @@ void ARPG_PlayerController::Server_PushInputTag_Implementation(FGameplayTag Inpu
 	//     自己负责，那条路已经通了
 	//   · 这里重复激活会让服务器上出现两份激活
 	// 这个 RPC 只解决"缓存里有没有货"这一件事。
+	//
+	// ══════════════════════════════════════════════════════════════════
+	//  服务器侧的两道门 ★
+	// ══════════════════════════════════════════════════════════════════
+	// 这个 RPC 的**参数来自客户端**，服务器不能无条件相信。
+	//
+	// 先澄清它**不是**什么：它不需要额外的"权威判断"。
+	// `UNetDriver::ShouldCallRemoteFunction` 保证只有 Owner 能对自己的
+	// Actor 发 Server RPC，加上 `APlayerController` 的
+	// `bOnlyRelevantToOwner`，别的客户端根本看不到你也调不到你 ——
+	// 下面两道门防的是"**改过的客户端**"，不是"别的玩家"。
+	//
+	// 也别把这里说成安全防线。真正的安全来自"服务器有权重算一切"
+	// （命中判定、伤害数值、状态变更全在服务器算）。
+	// 这里做的只是"别让明显的垃圾进缓存"。
+
+	// 门 ①：标签白名单。
+	// 服务器会照单全收任意 GameplayTag —— 不在映射表里的标签推进去也没用
+	// （连段的消费只认自己那几个），但会白占一个缓存槽（容量 4，满了挤掉最旧的），
+	// 把**合法**的连段输入挤出去。
+	if (!GetRPGAbilitySystemComponent()
+		|| !GetRPGAbilitySystemComponent()->HasAbilityForInputTag(InputTag))
+	{
+		UE_LOG(LogRPG_Ability, VeryVerbose,
+			TEXT("[%s] 服务器丢弃未登记的输入标签：%s"), *GetName(), *InputTag.ToString());
+		return;
+	}
+
 	if (ARPG_BaseCharacter* RPGChar = GetRPGCharacter())
 	{
+		// 门 ②：存活判断。
+		// 客户端在 `OnAbilityInputPressed` 里已经判过 `IsAlive`，但那是在**客户端** ——
+		// 服务器不能依赖客户端的判断。不判的话，改过的客户端可以在死亡期间
+		// 往服务器缓存里塞条目（危害有限，重生时 `ClearInputBuffer` 会兜住，
+		// 但"死人没有意图"这条规则在服务器侧不该是缺失的）。
+		if (!RPGChar->IsAlive())
+		{
+			return;
+		}
+
 		if (URPG_CombatComponent* Combat = RPGChar->GetCombatComponent())
 		{
 			Combat->PushInputTag(InputTag);

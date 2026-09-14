@@ -171,6 +171,22 @@ protected:
 	/** 订阅失败的轮询间隔（秒）。只是启动时兜底，不成功就一直试 */
 	static constexpr float BindRetryInterval = 0.2f;
 
+	/**
+	 * 重试多少次之后，如果**仍然只有 ASC、没有属性集**，就打一条 Warning。
+	 *
+	 * 为什么用"重试次数"而不是"属性集为空"来判定故障：
+	 * "ASC 在、属性集还没登记"是**每个敌人必经的中间态** ——
+	 * 敌人的属性集是在 `InitializeAbilitySystem()` 里 AddSpawnedAttribute 的，
+	 * 而组件 BeginPlay（→ InitWidget → 本 Widget）**早于**角色的 BeginPlay。
+	 * 拿"为空"当故障，就是每刷一个敌人报一次假警。
+	 *
+	 * 25 × 0.2s ≈ 5 秒 —— 真故障 5 秒内一定报；正常的初始化几十毫秒就过去了。
+	 */
+	static constexpr int32 AttributeSetWarnAfterAttempts = 25;
+
+	/** 当前连续重试了多少次。绑定成功时清零 */
+	int32 BindAttemptCount = 0;
+
 	// ── 绑定控件 ──
 
 	UPROPERTY(meta = (BindWidget))

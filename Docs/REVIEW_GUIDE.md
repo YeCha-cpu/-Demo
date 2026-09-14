@@ -109,7 +109,13 @@
 ```
 
 **⑦ 独立代码审查**是后加的，触发点是阶段 6 那次审查一口气抓出了五个问题
-（其中一个让整个受击功能是死代码）。从阶段 8 起固定为提交前动作。
+（其中一个让整个受击功能是死代码）。
+
+> ⚠️ **诚实记录**：阶段 8 的六个提交**一次都没跑过独立审查** ——
+> 是写这份文档时才发现的（文档承诺的工作流和实际做到的对不上）。
+> 补跑的结果在 [`REVIEW_PHASE8.md`](./REVIEW_PHASE8.md)：15 个确认问题，
+> 其中最重的是「诊断代码自己有假阳性」和「注释里的因果写反了」。
+> 从那以后固定为提交前动作。
 
 > **为什么强调这个**：这个项目的 commit message 异常长，不是话痨——
 > 是因为**踩坑的原因是代码里看不出来的**。比如"为什么 `InstancingPolicy` 必须显式设成
@@ -995,6 +1001,7 @@ if (IsLocallyControlledPlayer()) { return; }   // Multicast_ShowDamageNumber 开
 | 现在是什么样 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) |
 | 怎么一步步变成这样 | **本文档** |
 | 这些零件怎么咬合成一条链（原理向） | [`REVIEW_PHASES_0-4.md`](./REVIEW_PHASES_0-4.md) |
+| 阶段 8 的独立代码审查记录（含 15 个确认问题） | [`REVIEW_PHASE8.md`](./REVIEW_PHASE8.md) |
 | 各阶段的编辑器配置步骤 | `PHASE1_EDITOR_SETUP.md` ~ `PHASE7_UI_SETUP.md` |
 | 联机验收与调试 | [`PHASE8_NETWORKING.md`](./PHASE8_NETWORKING.md) |
 | UE 5.8 API 与网上教程不一样的地方 | `ARCHITECTURE.md` 附录 B |
