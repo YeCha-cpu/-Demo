@@ -9,6 +9,7 @@
 
 #include "AbilitySystem/RPG_AttributeSet.h"
 #include "Character/RPG_BaseCharacter.h"
+#include "Core/RPG_LogChannels.h"
 
 void URPG_OverheadHealthBarWidget::SetOwningActor(AActor* InOwner)
 {
@@ -111,6 +112,11 @@ void URPG_OverheadHealthBarWidget::RevealForDamage()
 {
 	if (!CanBeRevealed())
 	{
+		// 这里是个**静默**分支，专门打一条日志。
+		// 不然"该亮没亮"和"压根没走到这儿"在日志上分不开。
+		UE_LOG(LogRPG_Combat, Verbose,
+			TEXT("[%s] 头顶血条该亮但被拦下（血量已 ≤ 0 或属性集读不到）"),
+			*GetNameSafe(OwningActor.Get()));
 		return;
 	}
 
@@ -266,6 +272,39 @@ void URPG_OverheadHealthBarWidget::TryBindToOwnerASC()
 		World->GetTimerManager().ClearTimer(BindRetryHandle);
 	}
 
+	// ══════════════════════════════════════════════════════════════════
+	//  接上之后立刻自检：属性集到底在不在？★
+	// ══════════════════════════════════════════════════════════════════
+	// "ASC 拿到了，但里面没有 URPG_AttributeSet"是一种**完全不报错**的失败：
+	//   · 订阅会成功（句柄有效）
+	//   · 但 RefreshBarValues 每次都因为 AttributeSet 为空而提前返回
+	//   · 表现是**血条永远空的、挨打也永远不亮** —— 和"没订阅上"一模一样
+	//
+	// 而它的成因和订阅毫无关系：属性集是**独立的子对象**，
+	// 服务器和客户端各构造一份，靠 `ReplicateSubobjects` 把服务器的
+	// 那份映射过来（`AbilitySystemComponent.cpp:1940-1946`，无条件、不分模式）。
+	// 这条映射要是没建立起来，ASC 本身照样正常 —— 所以光看 ASC 判断不出来。
+	//
+	// 敌人（ASC 在角色身上）和玩家（ASC 在 PlayerState 上）走的是**两套**
+	// 子对象复制路径，出问题的可能性也不是均等的，所以这条日志要打全：
+	// 主人是谁、ASC 挂在谁身上、属性集在不在。
+	if (ASC->GetSet<URPG_AttributeSet>())
+	{
+		UE_LOG(LogRPG_Combat, Log,
+			TEXT("[%s] 头顶血条已接上 ASC（ASC 在 %s 上），当前血量 %.1f"),
+			*GetNameSafe(OwningActor.Get()), *GetNameSafe(ASC->GetOwnerActor()),
+			ASC->GetSet<URPG_AttributeSet>()->GetHealth());
+	}
+	else
+	{
+		UE_LOG(LogRPG_Combat, Warning,
+			TEXT("[%s] 头顶血条订上了 ASC（%s，挂在 %s 上）但里面**没有 URPG_AttributeSet** —— "
+			     "血条会一直是空的、挨打也不会亮。属性集没复制过来，"
+			     "检查 %s 上的 AddSpawnedAttribute 和 SpawnedAttributes 的复制"),
+			*GetNameSafe(OwningActor.Get()), *ASC->GetName(), *GetNameSafe(ASC->GetOwnerActor()),
+			*GetNameSafe(ASC->GetOwnerActor()));
+	}
+
 	// 刚接上，立刻读一次当前值
 	RefreshFromOwner();
 }
@@ -311,6 +350,14 @@ void URPG_OverheadHealthBarWidget::RefreshBarValues()
 	// 而且血量小幅震动不应该触发亮起。
 	const bool bWasInitialized = LastSeenHealth >= 0.f;
 	const bool bLostHealth = bWasInitialized && (Health < LastSeenHealth - KINDA_SMALL_NUMBER);
+
+	if (bLostHealth)
+	{
+		// Verbose：只在排查"挨打亮不亮"时开（`Log LogRPG_Combat Verbose`）。
+		// 记下**变化前后**两个值 —— 只看当前值判断不出是"没掉血"还是"没收到"。
+		UE_LOG(LogRPG_Combat, Verbose, TEXT("[%s] 头顶血条：检测到掉血 %.1f → %.1f"),
+			*GetNameSafe(OwningActor.Get()), LastSeenHealth, Health);
+	}
 
 	LastSeenHealth = Health;
 

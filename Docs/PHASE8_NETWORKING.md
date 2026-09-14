@@ -284,6 +284,7 @@ Log LogRPG_Animation Verbose    // 动画状态
 | 客户端**出招一顿一顿的 / 连段接不上**（主机却正常） | 服务器有没有收到 `Server_PushInputTag` | 见 §1.5 的 H1：服务器输入缓存是空的 → 提前 `EndAbility` → `ClientEndAbility` → `Montage_Stop(0.f)` 硬切。**主机收不到这条 RPC，所以主机正常** —— 这个"主机 vs 客户端"的差异就是判据 |
 | 客户端看远程玩家的**动画很"跳"、像低帧率** | `RPG_PlayerState` 的 `NetUpdateFrequency` | 见 §1.5 的 H2：`APlayerState` 默认 1Hz，而玩家的 ASC 挂在 PlayerState 上。敌人不受影响（ASC 在自己身上） |
 | 蒙太奇**被谁掐掉了查不出来** | CVar `RPG.LogMontageInterruptStack 1` | 打开后会在截短时打调用栈。默认关着是因为 `DumpStackTraceToLog` 很吵 |
+| **客户端看不到某个角色的头顶血条** | 先分"没掉血"还是"没亮" | 见 §4.5 的两步二分法。**别直接改 UI** —— 伤害没落到目标身上时画面完全一样 |
 | 客户端**看不到敌人血条** | 敌人的 ASC 属性是否复制 | 属性集用的是 `COND_None`，理论上所有人都收得到 |
 | 自己头顶**也**有血条 | `IsLocallyControlledPlayer()` 的判定 | 见 ARCHITECTURE 阶段 7 的那个坑 |
 | 客户端**复活后位置不对** | `ClientSetLocation` 有没有被调到 | 见 §3.3 的说明 |
@@ -299,6 +300,69 @@ Log LogRPG_Animation Verbose    // 动画状态
 
 联机时序问题的典型特征：**加日志反而看不出来**（因为日志本身也有时序）。
 这时候要看的是"**哪个值在哪一端是多少**"，而不是"代码走到哪一行了"。
+
+---
+
+### 4.5 案例：「客户端看不到 host 玩家的头顶血条」
+
+**实测症状（2026-09-14）**
+
+| 攻击方 → 目标 | 在谁的屏幕上 | 结果 |
+|---|---|---|
+| server → 客户端玩家 | 服务器 | ✅ 亮 |
+| 客户端 → AI | 客户端 | ✅ 亮 |
+| **客户端 → host 玩家** | **客户端** | ❌ **不亮** |
+
+**这个组合的价值在于它只差一个变量**：host 玩家的 ASC 在 **PlayerState** 上，
+AI 的 ASC 在**角色自己身上**。其余全都一样。所以怀疑面被压到一条：
+"ASC 挂在 PlayerState 上时，客户端能不能拿到它的属性集"。
+
+**第一步：先劈成两半（各 1 分钟，别跳过）**
+
+| # | 测试 | 结论 |
+|---|---|---|
+| ① | 客户端打 host 玩家，**盯着 host 自己的窗口** —— 他的血掉了没？受击动画播了没？ | **掉了** → 伤害没问题，问题在**血条**这条路<br>**没掉** → 是**伤害压根没落到 host 身上**，和血条无关，去查武器轨迹/命中判定 |
+| ② | 让 **AI** 打 host 玩家，看**客户端**窗口 | 客户端能看到 host 血条亮 → 和"伤害来自谁"有关<br>看不到 → 与伤害来源无关，就是 **host 血条在客户端的订阅/复制**这一条 |
+
+第 ① 步最关键：**"血条不亮"和"没掉血"在画面上长得一模一样**，
+不先分开就会一头扎进 UI 代码里查一个根本不存在的 bug。
+
+**第二步：开日志，让 C++ 直接说哪一环断了**
+
+```
+Log LogRPG_Combat Log          // 订阅结果 + 掉血检测
+Log LogRPG_Combat Verbose      // 再加每一条明细
+```
+
+| 日志 | 含义 |
+|---|---|
+| `头顶血条已接上 ASC（ASC 在 RPG_PlayerState_C_0 上），当前血量 N` | 链路通。**核对 N 是不是等于 host 的真实血量** |
+| `订上了 ASC（...）但里面**没有 URPG_AttributeSet**` | ★ **属性集没复制过来** —— 血条会一直空着、挨打也不亮 |
+| `头顶血条：检测到掉血 a → b` | 掉血被检测到了，后面必然会走亮起 |
+| `该亮但被拦下（血量已 ≤ 0 或属性集读不到）` | 属性集读不到，或血量已经是 0 |
+| **完全没有 host 的日志** | widget 压根没被创建 —— 去查 `Widget Class` 和组件可见性 |
+
+**为什么加"属性集在不在"这条自检**
+
+`ASC 拿到了、但里面没有 AttributeSet` 是一种**完全不报错**的失败：
+
+- 订阅会成功，`FDelegateHandle` 有效
+- 但 `RefreshBarValues()` 每次都因为 `AttributeSet == nullptr` 提前返回
+- 表现是**血条永远空的、挨打也永远不亮** —— 和"没订阅上"在画面上没有任何区别
+
+成因和订阅毫无关系：属性集是**独立的子对象**，服务器和客户端各构造一份，
+靠 `ReplicateSubobjects` 把服务器那份映射过来
+（`AbilitySystemComponent.cpp:1940-1946`：无条件、不分复制模式）。
+这条映射没建立起来的话，ASC 本身照样一切正常 —— 所以光看 ASC 判断不出来。
+
+**已验证无误、别再怀疑的三个地方**（省得下次又绕回去）
+
+| 环节 | 结论 | 依据 |
+|---|---|---|
+| 属性有没有复制条件限制 | **没有**，全量 | `RPG_AttributeSet.cpp:268-275` 全是 `COND_None` |
+| 复制会不会被 Minimal/Mixed 模式挡住 | **不会** | `ReplicateSubobjects` 无模式判断，无条件遍历 `SpawnedAttributes` |
+| 主机看远端玩家会不会被误判成本地玩家 | **不会** | `IsLocalController()` 第三条要求 `GetRemoteRole() != ROLE_AutonomousProxy`，正好挡住了服务器上托管的远端玩家 PC |
+| `GetAbilitySystemComponent()` 有没有正确分派到 PlayerState | **有** | `ARPG_BaseCharacter::GetAbilitySystemComponent()` → 虚函数 `GetASCInternal()`，`ARPG_Player` 重写为读 PlayerState |
 
 ---
 
