@@ -46,7 +46,7 @@
 | 层 | 内容 | 状态 |
 |---|---|---|
 | **L1 基础复制** | 属性集 `ReplicatedUsing` + `OnRep_*`、ASC 复制开关、服务器/客户端权威分支 | ✅ 阶段 1 已实现 |
-| **L2 权威与预测** | GA 的 `NetExecutionPolicy`、伤害服务器权威判定、蒙太奇与 GameplayCue 全端同步 | ⚠️ 阶段 2 已实现，但**客户端输入激活链路有个待修的洞** —— 见 §15 |
+| **L2 权威与预测** | GA 的 `NetExecutionPolicy`、伤害服务器权威判定、蒙太奇与 GameplayCue 全端同步 | ✅ 阶段 2 实现，阶段 8 补齐了客户端输入链路（见 §15） |
 | **L3 进阶** | 延迟补偿、位置回滚、专用服务器、网络平滑调参 | ❌ 不做 |
 
 - **主模式：Listen Server** —— PIE 里设 `Number of Players = 2` + `Net Mode = Play As Listen Server` 即可测试，不需要额外打包 Dedicated Server
@@ -1818,14 +1818,16 @@ Content/RPG/
 > 而**段位仍读权威的 `LvN` 标签**，所以误差最多影响"条过没过刻度线"，
 > 不会出现"UI 说二段、实际打了三段"。
 
-### 阶段 8 · 联机补完 —— ⏳ 下一阶段
+### 阶段 8 · 联机补完 —— ⏳ 进行中
 
 这一阶段**不加新玩法**，只把已经写在文档里的联机承诺兑现。
 起因是阶段 6 的独立代码审查发现：项目对外声称的 L2（权威与预测）
 其实有一个洞，而且本机测试**永远测不出来**。
 
-- [ ] **① 修复：客户端无法激活任何输入能力** ★ 最高优先级
-      —— 详见 [§15 已确认待修](#️-已确认待修客户端无法激活输入能力)
+- [x] **① 修复：客户端无法激活任何输入能力** ★
+      —— 拆成 `RegisterInputAbilityMappings`（两端）+ `GrantInputAbilities`（服务器）
+      + `OnRep_ActivateAbilities` 里重建索引。详见
+      [§15 已修复](#-已修复阶段-8客户端无法激活输入能力)
 - [ ] **② PIE 双客户端完整验收**
       —— 目前所有验收标准都是单机跑的，联机路径从来没被真正走过：
       输入激活 / 伤害结算 / 受击死亡表现 / 布娃娃 / 头顶血条 / 飘字
@@ -1833,9 +1835,12 @@ Content/RPG/
       —— 阶段 6/7 加了不少权威判断（事件广播、NetMulticast、位置同步），
       它们都是按"服务器产生、客户端消费"写的，但没在两端同时验证过
 - [ ] **④ 把联机调试方法整理成可复用的清单**
-      —— `showdebug abilitysystem`、PIE 双客户端配置、
-      怎么看"单机正常联机才暴露"这类问题的日志
+      —— 见 [`PHASE8_NETWORKING.md`](./PHASE8_NETWORKING.md)
 - [ ] **✅ 验收：两个 PIE 客户端各自都能攻击、挨打、死亡、复活、看到对方头顶血条**
+
+> ⚠️ **① 只做到"静态可验证"为止。** 代码路径、引擎 API 用法、
+> 权限判定都核对过了，但**两个真实客户端跑起来是什么样，只能你亲自 PIE 一次**。
+> 见 PHASE8 文档里的验收清单。
 
 > ⚠️ **为什么它值得单独一个阶段，而不是塞进"打磨"**
 >
@@ -1883,6 +1888,9 @@ Content/RPG/
 | 19 | **UI 不碰玩法逻辑** | 蓄力条不读 GA 私有成员，改成"标签当节拍器 + UI 自己计时"；段位仍读权威标签，避免 UI 与逻辑不一致 |
 | 20 | **表现类 RPC 的选型** | 飘字为什么用 `NetMulticast Unreliable` 而不是 Reliable，也不是 GameplayEvent；世界坐标 → 屏幕坐标为什么必须由各端自己做 |
 | 21 | **头顶血条的显示判据** | 为什么用 `IsLocallyControlled()` 而不是"是玩家还是敌人"；为什么要在 `BeginPlay`/`PossessedBy`/`OnRep_Controller` 三处刷新 |
+| 22 | **"配置数据" vs "运行时状态"** | 输入标签→能力的映射表是纯配置，两端都该有；SpecHandle 是运行时状态，只能服务器产生。把两者混在一个函数里，就会有"客户端永远拿不到映射表"这种 bug |
+| 23 | **引擎的"本地"不等于"本地玩家"** | `IsLocallyControlled()` 对服务器上的 AIController 也返回 true；"权威地跑在这台机器上"和"我控制着它"是两件事 |
+| 24 | **副本会复制，但索引不会** | `ActivatableAbilities` 是 `COND_ReplayOrOwner`，会复制到 owning client；但任何你自己维护的"标签→Handle"索引都不会。复制过来的东西需要有人重建索引 —— `OnRep_ActivateAbilities` 就是那个时机 |
 
 > 💡 **用法建议**：面试时不要一口气全讲。挑 2~3 个和岗位最相关的深入讲，其余作为"我还做了这些"的引子。**主动说出取舍和替代方案的缺点**，比只讲自己的实现更有说服力——那说明你是在做工程决策，而不是照抄教程。
 
@@ -2055,19 +2063,48 @@ GAS 的处理方式：
 | 7 | 巡逻点来源 | 关卡内摆 `TargetPoint` 数组 | Spline 巡逻路线 / EQS |
 | 8 | 攻击模组切换 | 运行时切换 DataAsset（预留武器 Actor） | MVP 先固定徒手 |
 
-### ⚠️ 已确认待修：客户端无法激活输入能力
+### ✅ 已修复（阶段 8）：客户端无法激活输入能力
 
-**由阶段 6 的独立代码审查发现（既有缺陷，不是阶段 6 引入的）。**
+**由阶段 6 的独立代码审查发现，阶段 8 修复。**
 
 | 项 | 内容 |
 |---|---|
 | **现象** | 在非服务器的机器上按攻击/闪避键**完全无效**，日志刷 `输入标签 X 没有绑定任何能力` |
-| **根因** | `RPG_Player.cpp` 的 `InitializeAbilitySystem()` 在 `!HasAuthority()` 时提前 return，于是 `RegisterInputAbilities` 只在服务器跑 —— 而 `InputTagToSpecHandle` 正是在那里填充的。`TryActivateAbilityByInputTag` 只查这张表，客户端上它永远是空的 |
+| **根因** | `RPG_Player::InitializeAbilitySystem()` 在 `!HasAuthority()` 时提前 return，于是 `RegisterInputAbilities` 只在服务器跑 —— 而 `InputTagToSpecHandle` 正是在那里填充的。`TryActivateAbilityByInputTag` 只查这张表，客户端上它永远是空的 |
 | **为什么不报"功能坏了"** | 能力 Spec 本身**会**复制到客户端（`ActivatableAbilities` 是 `COND_ReplayOrOwner`），所以"能力已经授予"这件事看起来完全正常 —— 断的只是"输入标签 → Handle"这一层索引 |
 | **影响** | 违反"做 L1+L2 联机"这条硬性要求；单机和 Listen Server 主机不受影响，所以本地测试很容易漏掉 |
-| **待定修法** | ① 把 `RegisterInputAbilities` 拆成"填映射表"（纯数据，两端都跑）+"授予"（仅服务器）；② 覆写 ASC 的 `OnRep_ActivateAbilities`，在客户端按类反查 Spec 重建 `InputTagToSpecHandle`；③ 或在 `TryActivateAbilityByInputTag` 里加按类扫描 `ActivatableAbilities` 的兜底路径 |
 
-> ⚠️ AI 也走 `TryActivateAbilityByInputTag`，改这个函数必须回归测试敌人攻击。
+#### 修法：把一个函数拆成两个，并补上客户端的重建路径
+
+```
+旧： RegisterInputAbilities(mappings)        ← 只在服务器的 HasAuthority 分支里调
+        └─ 登记映射 + 逐个授予
+
+新： RegisterInputAbilityMappings(mappings)  ← 两端都调（纯配置数据）
+     GrantInputAbilities()                   ← 仅服务器（真正授予）
+     RebuildInputTagHandleMap()              ← 客户端：从复制的 Spec 反查重建索引
+        └─ 由 OnRep_ActivateAbilities() 触发
+```
+
+**三个关键判断，以及为什么是它们：**
+
+| 判断 | 依据 |
+|---|---|
+| 映射表要在**两端**登记 | 它是纯配置（角色的 `StartupAbilities`），不是运行时状态。客户端也要靠它把输入标签翻译成能力 |
+| 客户端靠 `OnRep_ActivateAbilities` 重建 | 这是引擎唯一保证"能力 Spec 列表变了"的通知点；基类实现里已经处理了"Spec 还没复制好就 0.5 秒后重试" |
+| 用 `FindAbilitySpecFromClass` 反查而不是自己遍历 | 客户端 `Spec.Ability` 指向的就是复制过来的能力 CDO，引擎的按类查找正好适用 |
+
+**另外把一条警告拆成了两条** —— 这是修复过程中顺手改掉的诊断缺陷：
+
+| 情况 | 含义 | 排查方向 |
+|---|---|---|
+| 标签**不在** `InputTagToAbilityClass` 里 | 配置错误：这个键压根没绑能力 | 改角色的 `StartupAbilities` |
+| 标签**在**表里但拿不到 Handle | 时序/授权：能力还没复制到，或服务器没授予 | 看联机时序与服务器日志 |
+
+原来这两种共用一句"没有绑定任何能力"，方向完全相反却给同一个提示 ——
+**这正是这个 bug 拖了那么久才被发现的原因之一**。
+
+> ⚠️ AI 也走 `TryActivateAbilityByInputTag`。修复后需要回归验证敌人攻击（服务器路径）。
 
 ---
 

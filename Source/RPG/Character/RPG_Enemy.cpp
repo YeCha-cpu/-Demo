@@ -118,6 +118,14 @@ void ARPG_Enemy::InitializeAbilitySystem()
 	UE_LOG(LogRPG_Ability, Log, TEXT("[%s] GAS 初始化完成（Owner 与 Avatar 均为自身，运行在%s）"),
 		*GetName(), HasAuthority() ? TEXT("服务器") : TEXT("客户端"));
 
+	// ── 输入标签 → 能力 的映射表：两端都登记 ──
+	//
+	// 敌人其实用不上这张表 —— AI 只在服务器跑，客户端上的敌人是模拟代理。
+	// 仍然两端都登记，是为了让"敌人的 GAS 初始化"和玩家完全同构：
+	// 唯一的差异就是下面那道 HasAuthority() 闸门，而不是"这里少一段、那里多一段"。
+	// 不同构的代价是以后每次改初始化流程都要想两遍。
+	AbilitySystemComponent->RegisterInputAbilityMappings(StartupAbilities);
+
 	// ── 以下只在服务器执行 ──
 	// 敌人由 AI 驱动，所有状态都在服务器产生、再复制给各客户端。
 	// 客户端上的敌人实例只需要正确的 ActorInfo（供动画和 GameplayCue 定位），
@@ -147,7 +155,8 @@ void ARPG_Enemy::InitializeAbilitySystem()
 
 	// ── 起始能力 ──
 	// 敌人用与玩家完全相同的映射机制，只是触发者会是 AI 而不是按键。
-	AbilitySystemComponent->RegisterInputAbilities(StartupAbilities);
+	// 映射表在上面已经登记过了，这里只负责授予。
+	AbilitySystemComponent->GrantInputAbilities();
 
 	// 被动能力同样要授予 —— 敌人也需要耐力恢复
 	for (const TSubclassOf<UGameplayAbility>& PassiveClass : StartupPassiveAbilities)

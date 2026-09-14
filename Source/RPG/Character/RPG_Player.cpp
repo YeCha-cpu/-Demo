@@ -157,6 +157,38 @@ void ARPG_Player::InitializeAbilitySystem()
 		*GetName(), *PS->GetName(), HasAuthority() ? TEXT("服务器") : TEXT("客户端"));
 
 	// ══════════════════════════════════════════════════════════════════
+	//  ★ 输入标签 → 能力 的**映射表：两端都要登记**
+	// ══════════════════════════════════════════════════════════════════
+	// 这是一张纯配置表（来自角色上的 StartupAbilities），不是运行时状态。
+	//
+	// 客户端也必须拿到它 —— 因为 PlayerController 按键时走的是
+	// `TryActivateAbilityByInputTag`，那个函数要靠这张表把输入标签翻译成能力。
+	//
+	// ⚠️ 这一步原先被放在下面的 `HasAuthority()` 分支**里面**，
+	// 于是客户端的映射表永远是空的：按任何键都会走到
+	// "这个输入标签没有绑定任何能力"，而且**只有在非服务器的机器上才会发生**。
+	// 单机测试永远发现不了。
+	//
+	// 注意这里只登记、不授予 —— 授予是下一段的事，那才是只能服务器做的。
+	if (URPG_AbilitySystemComponent* RPGASC = Cast<URPG_AbilitySystemComponent>(ASC))
+	{
+		RPGASC->RegisterInputAbilityMappings(StartupAbilities);
+	}
+	else
+	{
+		UE_LOG(LogRPG_Ability, Error,
+			TEXT("[%s] ASC 不是 URPG_AbilitySystemComponent，无法登记输入能力映射。"
+			     "请检查 PlayerState 的 ASC 类型"), *GetName());
+
+		// ⚠️ 必须 return，不能让它继续走到函数末尾把 bAbilitySystemInitialized 置上。
+		//
+		// 不 return 的话，后面所有初始化时机都会因为那个标志变成空操作，而
+		// 唯一的线索就只有上面这一行 Error —— 排查时看到的是
+		// "初始化只跑了一次、之后再没动静"，很难联想到是这里提前"成功"了。
+		return;
+	}
+
+	// ══════════════════════════════════════════════════════════════════
 	//  以下只在服务器执行 —— 客户端靠复制拿到同样的状态
 	// ══════════════════════════════════════════════════════════════════
 	// 为什么客户端不做这两件事：
@@ -216,19 +248,14 @@ void ARPG_Player::InitializeAbilitySystem()
 	// ══════════════════════════════════════════════════════════════════
 	if (URPG_AbilitySystemComponent* RPGASC = Cast<URPG_AbilitySystemComponent>(ASC))
 	{
-		RPGASC->RegisterInputAbilities(StartupAbilities);	// 批量授予能力
+		// 按上面已登记的映射逐个授予
+		RPGASC->GrantInputAbilities();
 
 		// 被动能力（耐力恢复等）没有输入标签，走单独的入口授予
 		for (const TSubclassOf<UGameplayAbility>& PassiveClass : StartupPassiveAbilities)
 		{
 			RPGASC->GivePassiveAbility(PassiveClass);
 		}
-	}
-	else
-	{
-		UE_LOG(LogRPG_Ability, Error,
-			TEXT("[%s] ASC 不是 URPG_AbilitySystemComponent，无法注册输入能力。"
-			     "请检查 PlayerState 的 ASC 类型"), *GetName());
 	}
 
 	bAbilitySystemInitialized = true;
