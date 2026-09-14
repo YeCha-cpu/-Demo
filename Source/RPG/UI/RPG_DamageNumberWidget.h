@@ -42,7 +42,7 @@ class RPG_API URPG_DamageNumberWidget : public UUserWidget
 
 public:
 	/**
-	 * 初始化一个飘字。由 URPG_HUDWidget 在创建之后立刻调用。
+	 * 初始化一个飘字。由 `ARPG_HUD::ShowDamageNumber()` 在创建之后立刻调用。
 	 *
 	 * @param Amount        伤害数值（只用于显示）
 	 * @param ScreenPosition 生成时的屏幕坐标（像素）

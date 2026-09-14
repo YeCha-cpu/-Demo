@@ -138,7 +138,8 @@ protected:
 	 * 拿到"我的主人"的 ASC。
 	 *
 	 * 返回 nullptr 是常态而非异常：Widget 可能在角色的 GAS 初始化之前
-	 * 就被造出来了，那时 ASC 还没就位。所以 NativeTick 里会一直重试到拿到为止。
+	 * 就被造出来了，那时 ASC 还没就位。所以走 `TryBindToOwnerASC()` 的重试定时器，
+	 * 拿到为止（**不是** NativeTick —— 为什么不用 tick 见下面 TryBindToOwnerASC 的说明）。
 	 *
 	 * ⚠️ 只认 SetOwningActor() 传进来的那个 Actor，
 	 * **不用 GetOwningPlayerPawn()** —— 那是本地玩家，不是血条主人。
