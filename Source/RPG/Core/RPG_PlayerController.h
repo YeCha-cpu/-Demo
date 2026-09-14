@@ -92,6 +92,40 @@ protected:
 	void OnAbilityInputPressed(FGameplayTag InputTag);
 	void OnAbilityInputReleased(FGameplayTag InputTag);
 
+	/**
+	 * 把玩家的输入意图送到**服务器**的输入缓存里。★ 联机连段的关键
+	 *
+	 * ══════════════════════════════════════════════════════════════════
+	 * 【为什么必须有这个 RPC】
+	 * ══════════════════════════════════════════════════════════════════
+	 * `URPG_CombatComponent::InputBuffer` 是**本机运行时对象**，从来不复制
+	 * （`NewObject` 建的，组件也没调 `SetIsReplicated`）。
+	 * 也就是说：**只有按键那台机器的缓存里有东西**。
+	 *
+	 * 而连段推进靠的正是这个缓存：
+	 *     `TryStartNextSegment()` → `Combat->ConsumeInputTag(...)`
+	 *
+	 * 于是服务器上那份轻击 GA **永远连不上第二段** ——
+	 * 它的衔接窗口开的时候，缓存是空的。
+	 * 第 1 段一结束服务器就 `EndAbility`，然后把这个"结束"复制给客户端：
+	 *     `ClientEndAbility` → `EndAbility` → `StopCurrentSegmentMontage()`
+	 *     → `Montage_Stop(0.f)`   ← **零混合时间的硬切**
+	 *
+	 * 表现就是"客户端出招一顿一顿的、连段打不全"，而**主机完全正常** ——
+	 * 因为引擎只在 `!IsLocallyControlled()` 时才发 `ClientEndAbility`，
+	 * 主机自己控制的 Pawn 收不到这条 RPC。
+	 *
+	 * 所以修法是：**让服务器的缓存和客户端保持一致**。
+	 * 客户端按键时额外发一条 RPC，服务器收到后往**同一个缓存**里推一条。
+	 * 之后服务器的连段推进就和客户端走完全相同的逻辑了。
+	 *
+	 * ⚠️ 用 `Reliable` 而不是 `Unreliable`：
+	 * 丢一条输入就是"这一段被吞了"，表现是连段断掉 —— 玩家会感觉按键失灵。
+	 * 输入事件的频率很低（人手按键），Reliable 的代价可以忽略。
+	 */
+	UFUNCTION(Server, Reliable)
+	void Server_PushInputTag(FGameplayTag InputTag);
+
 private:
 	/** 取当前控制的 RPG 角色，失败返回 nullptr */
 	ARPG_BaseCharacter* GetRPGCharacter() const;

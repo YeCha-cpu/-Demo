@@ -164,6 +164,75 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RPG|Locomotion", meta = (ClampMin = "0.0"))
 	float IdleSpeedThreshold = 10.f;
 
+	// ══════════════════════════════════════════════════════════════════
+	//  蒙太奇生命周期诊断 ★
+	// ══════════════════════════════════════════════════════════════════
+	//
+	//  「客户的出招动画有顿挫感」是一句**主观描述**，没法直接查。
+	//  这一组回调把它变成一个数字：
+	//
+	//      这个蒙太奇被播了多久、它的全长是多少、结束的时候是不是"被打断"
+	//
+	//  如果日志里反复出现「只播了 0.4 秒 / 全长 0.8 秒 / bInterrupted=true」，
+	//  那就不是"网络卡"，而是**有人在动画播完之前把它停掉了** ——
+	//  接下来只要找"是谁停的"就行。
+	//
+	//  为什么挂在这里而不是 GA 里：GA 只知道"我请求播放了"，
+	//  而蒙太奇被谁停掉（自己结束、被别的蒙太奇顶掉、能力结束、
+	//  预测被服务器拒绝）**它不一定知情**。AnimInstance 是所有路径的必经之地。
+	//
+	//  用引擎的动态多播委托而不是自己埋点，是因为它覆盖了**全部**打断来源 ——
+	//  包括引擎自己发起的（比如 `OnPredictiveMontageRejected`）。
+
+	/**
+	 * 一个蒙太奇的播放记录。
+	 *
+	 * ⚠️ **必须每个蒙太奇一条**，不能用一个成员变量存"当前正在播的那个"。
+	 *
+	 * 第一版就是那么写的，结果连段时数字全是乱的 ——
+	 * 因为连段切段是"先停上一段、再播下一段"，两段在**同一帧**里重叠：
+	 *     StartSegment:  StopCurrentSegmentMontage()   → 上一段开始结束
+	 *                    PlayMontageOrSkip(下一段)     → 记录被覆盖
+	 *     上一段的 Ended 回调           → 拿到的却是**下一段**的开始时间
+	 * 于是日志里出现了"实播 0.02s""实播 8.84s""全长 0.00s"这些一看就不对的值。
+	 *
+	 * 教训：**做诊断工具时，"被观测对象是并发存在的"这件事必须先在数据结构上体现出来。**
+	 * 用一个变量记"当前"，就是在假设"同一时刻只有一个" —— 而这个假设在连段里不成立。
+	 */
+	struct FMontagePlayRecord
+	{
+		/** 开始播放的世界时间（秒） */
+		float StartTime = 0.f;
+
+		/** 蒙太奇全长（秒） */
+		float Length = 0.f;
+	};
+
+	/** 蒙太奇开始播放。按蒙太奇登记一条记录 */
+	UFUNCTION()
+	void HandleMontageStarted(UAnimMontage* Montage);
+
+	/**
+	 * 蒙太奇结束（自然播完 / 被打断 / 被停掉都会走到这里）。
+	 *
+	 * @param bInterrupted true = **没播完就被停了**。这正是"顿挫"要找的那类事件
+	 */
+	UFUNCTION()
+	void HandleMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
+	/** 正在播放中的蒙太奇记录。键是弱引用，蒙太奇被卸载时条目会自然失效 */
+	TMap<TWeakObjectPtr<UAnimMontage>, FMontagePlayRecord> MontagePlayRecords;
+
+	/**
+	 * 只有实际播放时长短于这个比例才打 Warning。
+	 *
+	 * 设 0.9：正常播完（算上 BlendOut 的少量偏差）不会报警，
+	 * 但被截掉 10% 以上就会。调成 1.0 会让正常的混合误差也刷屏，
+	 * 反而把真正的问题淹掉。
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "RPG|Diagnostics", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float MontageCutShortWarnRatio = 0.9f;
+
 private:
 	/** 所属角色。弱引用 —— AnimInstance 生命周期可能比角色长（编辑器预览） */
 	TWeakObjectPtr<ARPG_BaseCharacter> OwnerCharacter;

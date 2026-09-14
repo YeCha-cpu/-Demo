@@ -316,6 +316,22 @@ void ARPG_PlayerController::OnAbilityInputPressed(FGameplayTag InputTag)
 		if (URPG_CombatComponent* Combat = RPGChar->GetCombatComponent())
 		{
 			Combat->PushInputTag(InputTag);
+
+			// ── 同时把这条意图送到服务器 ★ ──
+			//
+			// 服务器的输入缓存不会自己填上 —— 它只在**按键那台机器**上被写。
+			// 而连段推进（TryStartNextSegment）读的正是这个缓存，
+			// 所以服务器那份 GA 永远连不上第二段，打完第 1 段就 EndAbility，
+			// 再用 ClientEndAbility 把客户端正在播的动画**硬切**掉。
+			//
+			// 只在"本地控制但又不是服务器"时发：
+			//   · 主机自己（Listen Server 的本机玩家）已经在服务器上了，不用发
+			//   · 远端玩家的 PlayerController 在这台机器上不会收到输入事件
+			// 所以这个条件正好覆盖"纯客户端"这一种情况，不会重复推。
+			if (IsLocalController() && !HasAuthority())
+			{
+				Server_PushInputTag(InputTag);
+			}
 		}
 	}
 
@@ -329,6 +345,32 @@ void ARPG_PlayerController::OnAbilityInputPressed(FGameplayTag InputTag)
 	// 那是 GA 的 CanActivateAbility 和 GE 的标签阻断该管的事。
 	// 控制器只负责把玩家的意图送达，判断权在能力系统内部。
 	ASC->TryActivateAbilityByInputTag(InputTag);
+}
+
+void ARPG_PlayerController::Server_PushInputTag_Implementation(FGameplayTag InputTag)
+{
+	// 服务器端的落地：把玩家的意图推进**这台机器上那份**缓存。
+	//
+	// 走的是和本地按键完全相同的入口 `PushInputTag` ——
+	// 和项目"A I 和玩家共用一条输入链路"的约定一致，
+	// 服务器这边不需要知道这条输入是玩家按的还是 RPC 送来的。
+	//
+	// 不在这里调 TryActivateAbilityByInputTag：
+	//   · 服务器侧的能力激活由 `ServerTryActivateAbility`（GA 的 LocalPredicted 机制）
+	//     自己负责，那条路已经通了
+	//   · 这里重复激活会让服务器上出现两份激活
+	// 这个 RPC 只解决"缓存里有没有货"这一件事。
+	if (ARPG_BaseCharacter* RPGChar = GetRPGCharacter())
+	{
+		if (URPG_CombatComponent* Combat = RPGChar->GetCombatComponent())
+		{
+			Combat->PushInputTag(InputTag);
+
+			UE_LOG(LogRPG_Ability, VeryVerbose,
+				TEXT("[%s] 服务器收到客户端输入：%s（缓存现有 %d 条）"),
+				*GetName(), *InputTag.ToString(), Combat->GetBufferedInputCount());
+		}
+	}
 }
 
 void ARPG_PlayerController::OnAbilityInputReleased(FGameplayTag InputTag)

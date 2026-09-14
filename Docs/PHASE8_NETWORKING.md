@@ -53,6 +53,79 @@
 
 ---
 
+## 1.5 已修复：客户端动画顿挫（两个根因）
+
+症状：**客户端出招一顿一顿的、连段接不上、动画的端到端传递有明显卡顿**，
+而**主机（Listen Server 的那个窗口）完全正常**。
+
+"主机正常、客户端不正常"这个对比本身就是线索 —— 它说明问题出在
+**只在客户端才成立的那条路径**上，而不是动画资产或蒙太奇配置。
+
+### 根因 H1：服务器的输入缓存是空的
+
+`URPG_CombatComponent::InputBuffer` 是 `NewObject` 建的本机对象，
+组件也没调 `SetIsReplicated` —— 它**从来不复制**。
+也就是说按键那台机器的缓存里有东西，服务器那份是空的。
+
+而连段推进靠的正是这个缓存：
+
+```
+TryStartNextSegment() → Combat->ConsumeInputTag(...)
+```
+
+于是服务器上的轻击 GA **永远连不上第二段**（衔接窗口打开时缓存是空的）。
+第 1 段一播完，服务器就 `EndAbility`，然后把这个"结束"复制给客户端：
+
+```
+ClientEndAbility → EndAbility → StopCurrentSegmentMontage()
+                              → Montage_Stop(0.f)   ← 零混合时间的硬切
+```
+
+主机为什么没事：引擎只在 `!IsLocallyControlled()` 时才发 `ClientEndAbility`，
+主机自己控制的 Pawn 收不到这条 RPC，所以硬切那一步不会发生。
+
+**修法**：让服务器的缓存和客户端保持一致。
+`ARPG_PlayerController::OnAbilityInputPressed` 里，本地按下时额外发一条
+`Server_PushInputTag`（`Reliable`），服务器收到后往**同一个缓存**里推一条。
+
+| 决策 | 选择 | 理由 |
+|---|---|---|
+| 走 RPC 补缓存，而不是"让服务器自己判断有没有按键" | ✅ | 服务器**无从知道**玩家按没按 —— 输入是客户端的事实 |
+| 推 `Input.*` 进缓存，而不是直接 `TryActivateAbility` | ✅ | 和玩家走完全相同的入口，连段/缓存/耐力/标签自动一致（这是项目从阶段 5 就定下的约定） |
+| `Reliable` | ✅ | 丢一条输入 = 这一段被吞掉，玩家感觉按键失灵。人手按键频率很低，代价可忽略 |
+
+### 根因 H2：蒙太奇复制的频率被 PlayerState 拖到了约 1Hz
+
+`APlayerState` 构造函数里**硬编码** `SetNetUpdateFrequency(1.f)`（`PlayerState.cpp:24-28`）。
+
+而本项目的**玩家 ASC 挂在 PlayerState 上**（这是 YeCha 定的规矩）——
+`UAbilitySystemComponent` 复制蒙太奇时是拿 `GetOwnerActor()` 去 `ForceNetUpdate` 的，
+OwnerActor 正是 PlayerState。所以玩家角色的动画复制实际只有 **约 1 次/秒**。
+
+敌人**不受影响**：它们的 ASC 在自己身上，角色默认 100Hz。
+
+**修法**：`ARPG_PlayerState` 构造函数里 `SetNetUpdateFrequency(30.f)`。
+
+> 🕳️ 这里有个容易走偏的点：GAS 在蒙太奇路径里确实调了
+> `AvatarActor->ForceNetUpdate()`，但属性（含 `RepAnimMontageInfo`）在
+> **PlayerState** 上 —— 刷 Avatar 不解决 Owner 的复制频率问题。
+
+### 顺带留下的诊断工具
+
+`URPG_AnimInstanceBase` 里加了按蒙太奇记录的播放时长统计，
+配合 CVar **`RPG.LogMontageInterruptStack`**（默认 0，设 1 打开）
+可以在蒙太奇被"截短"时打一份调用栈 —— 用来定位"是谁把动画掐掉的"。
+
+判据是 `实播时长 < 全长 × MontageCutShortWarnRatio`（默认 0.9），
+**不是** `bInterrupted` —— 后者在"蒙太奇完整播完但能力结束时"也会是 true，
+会刷一堆假警报。
+
+> 面试时的说法：这两个都是**"本地看起来对、网络下才暴露"**的典型 ——
+> H1 是"状态放错了地方"（客户端本机状态 vs 服务器权威状态），
+> H2 是"复制频率取决于 Owner 而不是你以为的那个对象"。
+
+---
+
 ## 2. ★ PIE 双客户端配置
 
 ### 2.1 设置（编辑器主工具栏，**Play 按钮旁边那个下拉箭头**）
@@ -144,21 +217,27 @@ LogRPG_Ability: 登记输入能力映射：5 条（客户端）
 
 ### 3.4 UI
 
+> ⚠️ 头顶血条是**挨打才亮、5 秒后收回**的（`PHASE7_UI_SETUP.md` §1.5.1）。
+> 所以"有血条"和"看得见血条"是两件事 —— 静置时谁的头上都**看不到**东西，
+> 这是对的，不要误判成 bug。
+
 | # | 操作 | 预期 |
 |---|---|---|
-| 16 | 看窗口 2 里窗口 1 的角色 | 头顶**有**血条 |
-| 17 | 看窗口 2 自己 | 头顶**没有**血条 |
-| 18 | 两端各自看敌人 | 都有血条 |
-| 19 | 窗口 2 死亡 | 只有窗口 2 弹死亡面板（窗口 1 不弹） |
+| 16 | 静置（谁都没挨打） | 窗口 1 和窗口 2 里，**所有角色头顶都看不到血条** |
+| 17 | 窗口 1 打窗口 2 一刀 | **窗口 1 屏幕上**：窗口 2 头顶血条亮出来，血量下降 |
+| 18 | 同上，看窗口 2 自己的屏幕 | 窗口 2 **自己头顶没有血条**（那是他本人）—— 他看左下的 HUD |
+| 19 | 窗口 1 打敌人一刀 | 窗口 1、窗口 2 两端**都**能看到敌人血条亮起 |
+| 20 | 窗口 2 挨打后等 5 秒 | 两端**同时**收回（各自本地计时，时长一致） |
+| 21 | 窗口 2 死亡 | 只有窗口 2 弹死亡面板（窗口 1 不弹） |
 
 ### 3.5 AI
 
 | # | 操作 | 预期 |
 |---|---|---|
-| 20 | 让敌人发现窗口 2 的玩家 | 敌人追击、攻击（AI 只在服务器跑，两端看到相同的移动） |
-| 21 | 打死正在攻击的敌人 | AI 停止，尸体不抽动 |
+| 22 | 让敌人发现窗口 2 的玩家 | 敌人追击、攻击（AI 只在服务器跑，两端看到相同的移动） |
+| 23 | 打死正在攻击的敌人 | AI 停止，尸体不抽动 |
 
-> ⚠️ 第 20-21 项是**回归测试**：这次改的 `TryActivateAbilityByInputTag`
+> ⚠️ 第 22-23 项是**回归测试**：这次改的 `TryActivateAbilityByInputTag`
 > 也是 AI 攻击走的函数。修复不能把服务器这条路弄坏。
 
 ---
@@ -202,6 +281,9 @@ Log LogRPG_Animation Verbose    // 动画状态
 | **客户端按键没反应** | 客户端日志有没有 `登记输入能力映射：N 条（客户端）` | ① N=0 → 角色蓝图的 `Startup Abilities` 是空的<br>② 有 `已登记映射但拿不到对应的能力实例` → 能力没复制到 / 服务器没授予<br>③ 有 `没有绑定任何能力` → 这个输入标签压根没配 |
 | 客户端能攻击但**没伤害** | 服务器日志有没有 `受到 X 点伤害` | 服务器端命中判定没通过（客户端只做预测表现，真实伤害在服务器算） |
 | **只有一边看得到受击动画** | 蒙太奇是否在服务器播放 | 受击 GA 是 `ServerOnly`，蒙太奇靠 `RepAnimMontageInfo` 复制 |
+| 客户端**出招一顿一顿的 / 连段接不上**（主机却正常） | 服务器有没有收到 `Server_PushInputTag` | 见 §1.5 的 H1：服务器输入缓存是空的 → 提前 `EndAbility` → `ClientEndAbility` → `Montage_Stop(0.f)` 硬切。**主机收不到这条 RPC，所以主机正常** —— 这个"主机 vs 客户端"的差异就是判据 |
+| 客户端看远程玩家的**动画很"跳"、像低帧率** | `RPG_PlayerState` 的 `NetUpdateFrequency` | 见 §1.5 的 H2：`APlayerState` 默认 1Hz，而玩家的 ASC 挂在 PlayerState 上。敌人不受影响（ASC 在自己身上） |
+| 蒙太奇**被谁掐掉了查不出来** | CVar `RPG.LogMontageInterruptStack 1` | 打开后会在截短时打调用栈。默认关着是因为 `DumpStackTraceToLog` 很吵 |
 | 客户端**看不到敌人血条** | 敌人的 ASC 属性是否复制 | 属性集用的是 `COND_None`，理论上所有人都收得到 |
 | 自己头顶**也**有血条 | `IsLocallyControlledPlayer()` 的判定 | 见 ARCHITECTURE 阶段 7 的那个坑 |
 | 客户端**复活后位置不对** | `ClientSetLocation` 有没有被调到 | 见 §3.3 的说明 |
@@ -234,7 +316,7 @@ Log LogRPG_Animation Verbose    // 动画状态
 | 5 | `State.Dead` 复制到了每一端 | `GA_Death` 里的 `CountToOwner` loose tag | 客户端看远程玩家的血条/表现 |
 | 6 | `State.Sprinting`（AI 追击时挂的）复制到了每一端 | `SetCombatMovement` 里的 `CountToOwner` | 客户端看敌人的跑步动画 |
 | 7 | 敌人的属性在 Mixed 复制模式下照常同步 | `RPG_AttributeSet` 的 `COND_None` | 客户端看敌人血条 |
-| 8 | AI 攻击路径没被这次修复弄坏 | `TryActivateAbilityByInputTag` | §3.5 第 20-21 项 |
+| 8 | AI 攻击路径没被这次修复弄坏 | `TryActivateAbilityByInputTag` | §3.5 第 22-23 项 |
 
 ---
 

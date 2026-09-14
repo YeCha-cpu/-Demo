@@ -1887,10 +1887,14 @@ Content/RPG/
 | 18 | **属性驱动 UI** | `GetGameplayAttributeValueChangeDelegate` 的两条触发路径（服务器 GE / 客户端 OnRep）；为什么 Max 变化时也要重画；委托 vs 轮询的取舍 |
 | 19 | **UI 不碰玩法逻辑** | 蓄力条不读 GA 私有成员，改成"标签当节拍器 + UI 自己计时"；段位仍读权威标签，避免 UI 与逻辑不一致 |
 | 20 | **表现类 RPC 的选型** | 飘字为什么用 `NetMulticast Unreliable` 而不是 Reliable，也不是 GameplayEvent；世界坐标 → 屏幕坐标为什么必须由各端自己做 |
-| 21 | **头顶血条的显示判据** | 为什么用 `IsLocallyControlled()` 而不是"是玩家还是敌人"；为什么要在 `BeginPlay`/`PossessedBy`/`OnRep_Controller` 三处刷新 |
+| 21 | **头顶血条的显示判据** | 为什么**不能**用 `IsLocallyControlled()`（它在服务器上的 AI 敌人身上恒为 true）；为什么要在 `BeginPlay`/`PossessedBy`/`OnRep_Controller` 三处刷新 |
 | 22 | **"配置数据" vs "运行时状态"** | 输入标签→能力的映射表是纯配置，两端都该有；SpecHandle 是运行时状态，只能服务器产生。把两者混在一个函数里，就会有"客户端永远拿不到映射表"这种 bug |
 | 23 | **引擎的"本地"不等于"本地玩家"** | `IsLocallyControlled()` 对服务器上的 AIController 也返回 true；"权威地跑在这台机器上"和"我控制着它"是两件事 |
 | 24 | **副本会复制，但索引不会** | `ActivatableAbilities` 是 `COND_ReplayOrOwner`，会复制到 owning client；但任何你自己维护的"标签→Handle"索引都不会。复制过来的东西需要有人重建索引 —— `OnRep_ActivateAbilities` 就是那个时机 |
+| 25 | **本机状态 vs 权威状态** | 输入缓存是"客户端的事实"，服务器无从知道 —— 不复制它就等于服务器瞎了。表现是"主机出招流畅、客户端连段接不上"，因为服务器提前 `EndAbility` 并把**零混合时间的硬切**复制给了客户端 |
+| 26 | **复制频率取决于 Owner，不是你以为的那个对象** | `APlayerState` 硬编码 1Hz；玩家的 ASC 挂在 PlayerState 上 → 动画复制只有约 1 次/秒。GAS 在蒙太奇路径里刷的是 `AvatarActor`，不解决 Owner 的频率问题。敌人（ASC 在自己身上）完全不受影响 |
+| 27 | **"不报错但永远不生效"是一类故障** | 延迟订阅如果押在"隐藏的 Widget 还 tick 不 tick"上，一旦 Slate 改了行为就是静默失效。改成 `TimerManager` 重试：与控件可见性无关、与初始化顺序无关。同类案例：`GA_HitReact` 漏配 `AbilityTriggers` |
+| 28 | **触发源要选两端都有的事件** | 头顶血条"挨打才亮"用**血量下降**而不是 `Event.Combat.Hit` —— 后者有权威守卫、只在服务器广播。血量下降在服务器（`SetHealth`）和客户端（`OnRep_Health`）走的是**同一个**属性委托，还顺带覆盖了没有单次命中事件的持续伤害 |
 
 > 💡 **用法建议**：面试时不要一口气全讲。挑 2~3 个和岗位最相关的深入讲，其余作为"我还做了这些"的引子。**主动说出取舍和替代方案的缺点**，比只讲自己的实现更有说服力——那说明你是在做工程决策，而不是照抄教程。
 

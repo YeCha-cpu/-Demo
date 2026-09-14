@@ -22,6 +22,27 @@ ARPG_PlayerState::ARPG_PlayerState()
 	AbilitySystemComponent = CreateDefaultSubobject<URPG_AbilitySystemComponent>(TEXT("AbilitySystemComponent"));
 	AttributeSet = CreateDefaultSubobject<URPG_AttributeSet>(TEXT("AttributeSet"));
 
+	// ══════════════════════════════════════════════════════════════════
+	//  ★ 提高 PlayerState 的复制频率（默认是 1 Hz）
+	// ══════════════════════════════════════════════════════════════════
+	// `APlayerState` 的构造函数里硬编码了 `SetNetUpdateFrequency(1)`
+	// （`PlayerState.cpp:28`）—— 对"分数、名字"这类几乎不变的数据来说，
+	// 每秒发一次是合理的。
+	//
+	// 但**玩家的 ASC 挂在这个 PlayerState 上**，而 ASC 的
+	// `RepAnimMontageInfo`（蒙太奇同步）是 ASC 的属性 ——
+	// 它跟着 **PlayerState 的通道**走。于是：
+	//
+	//     玩家的蒙太奇同步 ≈ 每秒 1 次
+	//     敌人的蒙太奇同步 ≈ 每秒 100 次（ASC 在角色身上，默认频率）
+	//
+	// 表现就是"看另一个玩家出招像幻灯片，看敌人却还行"。
+	//
+	// ⚠️ 注意这是**整个 PlayerState** 的复制频率，不只是蒙太奇 ——
+	// 属性、标签、GE 全都跟着提速。所以别设太高：30 已经和引擎的
+	// `NetServerMaxTickRate`（默认 30）持平，再高也发不出去，只是白算。
+	SetNetUpdateFrequency(30.f);
+
 	// ⚠️ 这一行不能省。
 	// AddSpawnedAttribute 把属性集登记进 ASC 的属性表，
 	// 之后 ASC->GetSet<URPG_AttributeSet>() 才能找到它。
