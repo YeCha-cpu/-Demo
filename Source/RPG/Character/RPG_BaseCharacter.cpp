@@ -233,6 +233,30 @@ void ARPG_BaseCharacter::RefreshOverheadWidgetVisibility()
 void ARPG_BaseCharacter::Multicast_ShowDamageNumber_Implementation(
 	float Amount, FVector_NetQuantize Location)
 {
+	// ══════════════════════════════════════════════════════════════════
+	//  ★ 自己挨打，不在自己的屏幕上冒数字
+	// ══════════════════════════════════════════════════════════════════
+	// 需求："玩家之间攻击要有伤害飘字；本地玩家遭受攻击则在本机隐藏。"
+	//
+	// 为什么判据放在这里就够：这个 Multicast 是在**受击者**身上发起的
+	// （见 RPG_AttributeSet::PostGameplayEffectExecute），所以：
+	//
+	//   · 受击者**自己那台机器** → IsLocallyControlledPlayer() == true  → 跳过
+	//   · 其他客户端 / 主机     → false → 照常显示（别人照样看得见你被打掉多少）
+	//   · AI 受击者             → 恒为 false（没有 PlayerController 控制它）→ 不受影响
+	//
+	// ⚠️ 用 IsLocallyControlledPlayer() 而不是 IsLocallyControlled()：
+	// 后者对服务器上的 AI 也返回 true（Controller.cpp:94-110），
+	// 会把"敌人挨打"在你的屏幕上一起吞掉。理由详见
+	// RefreshOverheadWidgetVisibility()。
+	//
+	// 顺带一提：本地玩家的伤害本来就有 HUD 那三条属性条在显示，
+	// 屏幕上再叠一个跟着自己角色飘的数字，位置又正好在屏幕中心，纯属干扰。
+	if (IsLocallyControlledPlayer())
+	{
+		return;
+	}
+
 	// 谁负责把它变成屏幕上的一个数字？—— HUD。
 	//
 	// 角色不该知道"飘字 widget 长什么样、放在哪、用什么动画"，

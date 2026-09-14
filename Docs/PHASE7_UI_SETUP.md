@@ -285,6 +285,41 @@ Slate 的实现细节（当前行为是会 tick，但没有任何东西保证它
 
 **随机散开**：同一个点附近的飘字会随机偏移最多 `22px`，避免多段伤害的数字完全重叠。
 
+#### 1.6.1 「谁能看见谁的飘字」★
+
+| 受击者 | 你在受击者自己的屏幕上 | 你在别人的屏幕上 |
+|---|---|---|
+| **你自己**（本地玩家） | ❌ **不显示** —— 见下 | ✅ 显示 |
+| 其他玩家 | — | ✅ 显示 |
+| AI | — | ✅ 显示 |
+
+**规则一：玩家之间攻击也要有飘字。**
+打另一个玩家、被另一个玩家打，和打 AI 走完全相同的链路。
+（`RPG_AttributeSet::PostGameplayEffectExecute` 里那个 `Cast<ARPG_BaseCharacter>` 曾经
+**只对敌人成立** —— 详见 §8 排查表里"打玩家没飘字"那一条。）
+
+**规则二：自己挨打，不在自己的屏幕上冒数字。**
+
+| | |
+|---|---|
+| 判据 | `IsLocallyControlledPlayer()` |
+| 判据在哪 | `ARPG_BaseCharacter::Multicast_ShowDamageNumber_Implementation()` 开头 |
+| 为什么放这儿就够 | 这个 Multicast 是在**受击者**身上发起的 |
+
+| | 判据结果 | 行为 |
+|---|---|---|
+| 受击者自己那台机器 | `true` | 跳过 —— 自己看不到自己挨打的数字 |
+| 其他客户端 / 主机 | `false` | 照常显示 —— **别人照样看得见你被打掉多少** |
+| AI 受击者 | 恒 `false` | 不受影响 |
+
+> **理由**：本地玩家的血量本来就有左下角那三条属性条在显示，
+> 屏幕上再叠一个跟着自己角色飘的数字，位置又正好在屏幕中心，纯属干扰。
+
+> ⚠️ 判据必须用 `IsLocallyControlledPlayer()`，**不是** `IsLocallyControlled()`。
+> 后者对服务器上的 AI 也返回 `true`（`Controller.cpp:94-110`），
+> 会把"**敌人**挨打"在你的屏幕上一起吞掉 —— 变成"打谁都没数字"。
+> 这个函数在本项目里已经踩过一次坑（见 §1.5.1 和 ARCHITECTURE 面试亮点 23）。
+
 ### 1.7 死亡面板
 
 | 元素 | 尺寸 | 说明 |
@@ -781,6 +816,8 @@ UI 自己数的只是"比例"，所以即使两个时钟差了一两帧，也只
 | 血条**亮了就不收回** | 计时器没起来 | `RevealDuration` 是不是被设成 0 或负数（C++ 的 `ClampMin = 0.1` 只约束编辑器输入框，改资产里的默认值要重新编译）。另外检查是不是每帧都在掉血（持续伤害会不断刷新计时，这属于预期） |
 | 血条**淡出之后再也不亮** | WBP 动画用 `Set Visibility → Visible` 把它锁住了 | §1.5.1 的说明：用 `Opacity` 做动画，别用 `Visibility` |
 | **尸体头上还亮着血条** | `CanBeRevealed()` 应该挡住 | 检查是不是在 WBP 里直接调了 `SetVisibility(Visible)`。C++ 的判据是"血量 ≤ 0 就不再亮" |
+| **打玩家没有飘字**（打 AI 正常） | 曾是 C++ 取了 ASC 的 **OwnerActor** 而不是**化身** | **已修**。`PostGameplayEffectExecute` 里 `Cast<ARPG_BaseCharacter>(OwningActor)` —— 玩家的 ASC 在 `RPG_PlayerState` 上，**OwnerActor 是 PlayerState，不是角色**，cast 静默失败，整个 `if` 被跳过。敌人碰巧能用（ASC 就在自己身上）。现在改用 `Data.Target.GetAvatarActor()`（`Data.Target` 是 `UAbilitySystemComponent&`，不是 ActorInfo）。**凡是需要"这是个角色"的地方都必须走 Avatar，不能走 Owner** |
+| **自己挨打，自己屏幕上冒数字** | 需求是本地隐藏 | **已实现**（§1.6.1）。`Multicast_ShowDamageNumber_Implementation` 开头判 `IsLocallyControlledPlayer()`。如果还冒，检查是不是在 HUD 里另有一条调用路径绕过了这个 Multicast |
 | **客户端看玩家不亮、看 AI 亮** | 曾是 C++ 的订阅重试是死代码 | **已修**。`TryBindToOwnerASC()` 里 `ASC == BoundASC.Get()` 排在 `if (!ASC)` 前面，而初始状态下两者**都是 null**，判断成立 → 第一次调用就"确认已接上"返回，重试定时器从没启动过。于是能否订上完全取决于 Widget 构造时 ASC 在不在：AI 在自己身上（有）→ 订上；玩家在 PlayerState 上（要等复制）→ 订不上。详见 `PHASE8_NETWORKING.md` §4.5 |
 | **其他玩家**挨打不亮血条（敌人正常） | 先分清楚是"配置"还是"代码" | 两者的现象一模一样。**先看日志**：<br>· 有 `头顶血条没有设置 Widget Class` → **配置问题**，`BP_RPG_Player` 的 `OverheadHealthBar` 组件上没配（`Widget Class` 是每个蓝图各自设的，不会从 `ARPG_BaseCharacter` 继承到具体值）<br>· 没有那条警告，但也不亮 → 才往代码查：`ResolveOwnerASC()` 走的是 `ARPG_Player::GetAbilitySystemComponent()` → PlayerState，客户端上 PlayerState 可能比 Pawn 晚到（重试定时器会兜住，等一两秒再看） |
 | **主机看不到其他玩家的血条** | 曾怀疑过 `IsLocallyControlledPlayer()` | **已核实无误**：`IsLocalController()`（`Controller.cpp:106-110`）的第三条要求 `GetRemoteRole() != ROLE_AutonomousProxy`，而服务器上托管的远端玩家 PC 的 RemoteRole 正是 `AutonomousProxy`，所以判定为 false → 血条正常显示。这一条特意写下来，免得下次又怀疑到它头上 |

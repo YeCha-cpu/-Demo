@@ -186,7 +186,32 @@ void URPG_AttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallba
 	// 不能用"只在服务器才调 RPC"以外的办法绕开。
 	if (bAuthority)
 	{
-		if (ARPG_BaseCharacter* OwningCharacter = Cast<ARPG_BaseCharacter>(OwningActor))
+		// ★ 这里必须取"**化身**"（Avatar = Pawn），**不能**用上面的 OwningActor。★
+		//
+		// `OwningActor` 是 ASC 的 **OwnerActor**，而本项目的 ASC 归属是分开的：
+		//   · 敌人 —— ASC 在自己身上，OwnerActor 就是角色本身
+		//   · 玩家 —— ASC 在 RPG_PlayerState 上，OwnerActor 是 **PlayerState**
+		//
+		// 于是 `Cast<ARPG_BaseCharacter>(OwningActor)` 对**玩家**会**静默失败**
+		// （PlayerState 不是角色），整个 if 被跳过 ——
+		// 表现就是"打敌人有飘字、打玩家没有"，而且不报任何错。
+		//
+		// 这是"玩家 ASC 放 PlayerState"这个决定带来的一处连带成本：
+		// **任何想拿到"角色实体"的地方都必须走 Avatar，不能走 Owner。**
+		// 下面发事件用的是 OwningActor，那条路没问题（PlayerState 也能收事件），
+		// 但凡是需要"这是个角色"的地方，就只能走 Avatar。
+		//
+		// `Data.Target` 是 UAbilitySystemComponent&（GameplayEffectExtension.h:18-28），
+		// 不是 ActorInfo，所以用 ASC 的 GetAvatarActor()（AbilitySystemComponent.h:1529）。
+		AActor* VictimAvatar = Data.Target.GetAvatarActor();
+		if (!VictimAvatar)
+		{
+			// 兜底：Avatar 还没指派上的窗口期（比如 GE 在 Possess 之前就落地）。
+			// 这时候 OwningActor 是唯一能用的位置来源。
+			VictimAvatar = OwningActor;
+		}
+
+		if (ARPG_BaseCharacter* VictimCharacter = Cast<ARPG_BaseCharacter>(VictimAvatar))
 		{
 			// 优先用命中点：武器轨迹检测把 HitResult 塞进了 EffectContext
 			// （见 URPG_GameplayAbilityBase::ApplyDamageToTarget 里的 AddHitResult）。
@@ -199,11 +224,11 @@ void URPG_AttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallba
 			}
 			else
 			{
-				NumberLocation = OwningActor->GetActorLocation()
-					+ FVector(0.f, 0.f, OwningCharacter->GetSimpleCollisionHalfHeight());
+				NumberLocation = VictimAvatar->GetActorLocation()
+					+ FVector(0.f, 0.f, VictimCharacter->GetSimpleCollisionHalfHeight());
 			}
 
-			OwningCharacter->Multicast_ShowDamageNumber(LocalDamage, NumberLocation);
+			VictimCharacter->Multicast_ShowDamageNumber(LocalDamage, NumberLocation);
 		}
 	}
 
