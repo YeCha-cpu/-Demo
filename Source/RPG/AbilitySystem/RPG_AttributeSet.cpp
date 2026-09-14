@@ -112,6 +112,30 @@ void URPG_AttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallba
 
 	AActor* OwningActor = GetOwningActor();
 
+	// ══════════════════════════════════════════════════════════════════
+	//  ★ "角色实体"一律取**化身**（Avatar），不要用 OwnerActor
+	// ══════════════════════════════════════════════════════════════════
+	// `OwningActor` 是 ASC 的 OwnerActor，而本项目的 ASC 归属是分开的：
+	//   · 敌人 —— ASC 在自己身上，OwnerActor 就是角色
+	//   · 玩家 —— ASC 在 RPG_PlayerState 上，OwnerActor 是 **PlayerState**
+	//
+	// 所以任何 `Cast<ARPG_BaseCharacter>(OwningActor)` 对**玩家**都会静默失败。
+	// 这个坑已经踩过一次（伤害飘字整段被跳过，打玩家不冒数字），
+	// 而且**不报任何错**。下面统一在这里解析一次，后面的代码都用 AvatarActor，
+	// 免得每处各写各的再漏一个。
+	//
+	// `Data.Target` 是 UAbilitySystemComponent&（GameplayEffectExtension.h:18-28），
+	// **不是** FGameplayAbilityActorInfo，所以没有 Data.Target.AvatarActor 那种写法，
+	// 要走 ASC 的 GetAvatarActor()（AbilitySystemComponent.h:1529）。
+	AActor* AvatarActor = Data.Target.GetAvatarActor();
+	if (!AvatarActor)
+	{
+		// 兜底：Avatar 还没指派上的窗口期（比如 GE 在 Possess 之前就落地）。
+		// 这时候 OwnerActor 是唯一能用的位置来源 —— 对敌人它是对的，
+		// 对玩家它会退化成"用 PlayerState 的位置"，聊胜于无。
+		AvatarActor = OwningActor;
+	}
+
 	// ── 无敌帧兜底检查 ──
 	// 第一道防线在 GE_Damage 资产上（TargetTagRequirements 组件，GE 层面直接拒绝应用，
 	// 连 Execution 都不会跑，更省性能）。这里再判一次是防御性编程：
@@ -186,32 +210,7 @@ void URPG_AttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallba
 	// 不能用"只在服务器才调 RPC"以外的办法绕开。
 	if (bAuthority)
 	{
-		// ★ 这里必须取"**化身**"（Avatar = Pawn），**不能**用上面的 OwningActor。★
-		//
-		// `OwningActor` 是 ASC 的 **OwnerActor**，而本项目的 ASC 归属是分开的：
-		//   · 敌人 —— ASC 在自己身上，OwnerActor 就是角色本身
-		//   · 玩家 —— ASC 在 RPG_PlayerState 上，OwnerActor 是 **PlayerState**
-		//
-		// 于是 `Cast<ARPG_BaseCharacter>(OwningActor)` 对**玩家**会**静默失败**
-		// （PlayerState 不是角色），整个 if 被跳过 ——
-		// 表现就是"打敌人有飘字、打玩家没有"，而且不报任何错。
-		//
-		// 这是"玩家 ASC 放 PlayerState"这个决定带来的一处连带成本：
-		// **任何想拿到"角色实体"的地方都必须走 Avatar，不能走 Owner。**
-		// 下面发事件用的是 OwningActor，那条路没问题（PlayerState 也能收事件），
-		// 但凡是需要"这是个角色"的地方，就只能走 Avatar。
-		//
-		// `Data.Target` 是 UAbilitySystemComponent&（GameplayEffectExtension.h:18-28），
-		// 不是 ActorInfo，所以用 ASC 的 GetAvatarActor()（AbilitySystemComponent.h:1529）。
-		AActor* VictimAvatar = Data.Target.GetAvatarActor();
-		if (!VictimAvatar)
-		{
-			// 兜底：Avatar 还没指派上的窗口期（比如 GE 在 Possess 之前就落地）。
-			// 这时候 OwningActor 是唯一能用的位置来源。
-			VictimAvatar = OwningActor;
-		}
-
-		if (ARPG_BaseCharacter* VictimCharacter = Cast<ARPG_BaseCharacter>(VictimAvatar))
+		if (ARPG_BaseCharacter* VictimCharacter = Cast<ARPG_BaseCharacter>(AvatarActor))
 		{
 			// 优先用命中点：武器轨迹检测把 HitResult 塞进了 EffectContext
 			// （见 URPG_GameplayAbilityBase::ApplyDamageToTarget 里的 AddHitResult）。
@@ -224,7 +223,7 @@ void URPG_AttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallba
 			}
 			else
 			{
-				NumberLocation = VictimAvatar->GetActorLocation()
+				NumberLocation = AvatarActor->GetActorLocation()
 					+ FVector(0.f, 0.f, VictimCharacter->GetSimpleCollisionHalfHeight());
 			}
 
@@ -247,7 +246,10 @@ void URPG_AttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallba
 			FGameplayEventData Payload;
 			Payload.EventTag = RPGTags::Event_Combat_Death;
 			Payload.Instigator = Data.EffectSpec.GetContext().GetInstigator();
-			Payload.Target = OwningActor;
+			// 用**化身**而不是 OwningActor —— Target 语义上是"被打的那个角色"，
+			// 而玩家的 OwningActor 是 PlayerState。目前没有消费者读它，
+			// 但留着就是同一个坑的下一次触发点（见上面 AvatarActor 的说明）。
+			Payload.Target = AvatarActor;
 			// 把"最后一击的伤害"带出去，死亡表现可以据此区分轻重击
 			Payload.EventMagnitude = LocalDamage;
 
@@ -263,7 +265,10 @@ void URPG_AttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallba
 		FGameplayEventData Payload;
 		Payload.EventTag = RPGTags::Event_Combat_Hit;
 		Payload.Instigator = Data.EffectSpec.GetContext().GetInstigator();
-		Payload.Target = OwningActor;
+		// 用**化身**而不是 OwningActor —— Target 语义上是"被打的那个角色"，
+		// 而玩家的 OwningActor 是 PlayerState。目前没有消费者读它，
+		// 但留着就是同一个坑的下一次触发点（见上面 AvatarActor 的说明）。
+		Payload.Target = AvatarActor;
 		Payload.EventMagnitude = LocalDamage;
 
 		UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(OwningActor, RPGTags::Event_Combat_Hit, Payload);

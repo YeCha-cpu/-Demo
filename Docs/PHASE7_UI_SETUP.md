@@ -320,6 +320,26 @@ Slate 的实现细节（当前行为是会 tick，但没有任何东西保证它
 > 会把"**敌人**挨打"在你的屏幕上一起吞掉 —— 变成"打谁都没数字"。
 > 这个函数在本项目里已经踩过一次坑（见 §1.5.1 和 ARCHITECTURE 面试亮点 23）。
 
+#### 「OwnerActor ≠ 角色」这个坑的审计记录
+
+`Cast<ARPG_BaseCharacter>(OwningActor)` 对**玩家**必然失败（OwnerActor 是 PlayerState），
+这是"玩家 ASC 放 PlayerState"这个决定的连带成本。**已经全库审计过一次**：
+
+| 位置 | 取的是 | 结论 |
+|---|---|---|
+| `RPG_AttributeSet::PostGameplayEffectExecute` | ~~OwningActor~~ → `Data.Target.GetAvatarActor()` | **曾是 bug**（飘字），已修 |
+| `RPG_AttributeSet` 的 `Payload.Target` | ~~OwningActor~~ → `AvatarActor` | 曾经也是 OwnerActor，**目前没有消费者读它**，但预防性改掉 |
+| `RPG_GameplayAbilityBase::GetRPGCharacter()` | `GetAvatarActorFromActorInfo()` | ✅ 本来就对 |
+| `RPG_BTDecorator_CanAttack` / `BTService_CombatUpdate` / `BTTask_Attack` | `GetPawn()` / 黑板里的 Actor | ✅ 本来就对 |
+| `RPG_AnimInstanceBase` | `TryGetPawnOwner()` | ✅ 本来就对 |
+| `RPG_PlayerController::GetRPGCharacter()` | `GetCharacter()` | ✅ 本来就对 |
+| `RPG_HUDWidget` | `GetOwningPlayerPawn()` | ✅ 本来就对（要的就是本地玩家） |
+| `RPG_OverheadHealthBarWidget` | `SetOwningActor()` 显式传入的角色 | ✅ 本来就对 |
+
+> **新写代码时的自检**：只要出现 `GetOwningActor()`（ASC 的）并且下一步要做
+> `Cast<ARPG_BaseCharacter>` 或者读位置，就先停下来问一句"这是 Owner 还是 Avatar"。
+> 敌人上两者恰好相同，所以**单机测不出来**。
+
 ### 1.7 死亡面板
 
 | 元素 | 尺寸 | 说明 |
