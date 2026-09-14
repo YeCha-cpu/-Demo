@@ -121,6 +121,61 @@ protected:
 	 */
 	UAbilityTask_PlayMontageAndWait* PlayMontageOrSkip(UAnimMontage* Montage, FName TaskName, float Rate = 1.f);
 
+public:
+	// ══════════════════════════════════════════════════════════════════
+	//  从 GameplayEvent 载荷里取参数 ★
+	// ══════════════════════════════════════════════════════════════════
+	//
+	// 场景里的效果触发器（`ARPG_EffectVolume`：药水 / 治疗泉 / 毒池 / 陷阱）
+	// 不直接施加 GE，而是发一个 GameplayEvent 让 GA 去施加 —— 这是项目定的链路。
+	// 事件里带着"施加哪个 GE、多大数值"这两个参数。
+	//
+	// ⚠️ **这两个函数存在的意义是把"载荷怎么取"收敛到一处。**
+	// 载荷里装 GE 用的是 `FGameplayEventData::OptionalObject` —— 它是个
+	// `UObject*`，装 `UClass` 时类型信息是丢的。这种技巧**放在一个地方
+	// 并写清楚，就是一个有据可查的约定；散落在每个 GA 里，就是一堆隐患。**
+	//
+	// 将来如果还要传更多参数（持续时间、层数、来源标签），
+	// 该做的是换成一个真正的 Payload UObject（项目里已有 `RPG_AttackWindowPayload`
+	// 这个先例），而不是继续往 OptionalObject 上挂东西。
+
+	/**
+	 * 取这次要施加的 GE。
+	 *
+	 * @param TriggerEventData  事件载荷，可以为空（手动激活时就没有）
+	 * @param Fallback          载荷里没有时用这个（通常是 GA 自己配的默认 GE）
+	 * @return                  载荷里带了合法 GE 就用它，否则用 Fallback
+	 */
+	static TSubclassOf<UGameplayEffect> ResolveEffectClassFromEvent(
+		const FGameplayEventData* TriggerEventData,
+		TSubclassOf<UGameplayEffect> Fallback);
+
+	/**
+	 * 取这次效果的数值（治疗量 / 强度）。
+	 *
+	 * @param Fallback  载荷里没有（或 <= 0）时用这个
+	 *
+	 * ⚠️ `<= 0` 一律当作"没给" —— 所以**不能**用这个传"治疗 0 点"那样的语义。
+	 * 这个取舍是有意的：漏配一个字段和故意填 0 在表现上没法区分，
+	 * 而前者更常见，所以让它回落到默认值更安全。
+	 */
+	static float ResolveMagnitudeFromEvent(const FGameplayEventData* TriggerEventData, float Fallback);
+
+	/**
+	 * 这个能力会不会响应某个 GameplayEvent。
+	 *
+	 * 给场景效果触发器（`ARPG_EffectVolume`）做诊断用：GAS 对"事件发出去
+	 * **没有人接**"是完全沉默的 —— 没有回调、没有日志，表现就是"捡了没反应，
+	 * 日志一片空白"。触发器在发送前用这个查一遍，没人接就报一条 Warning。
+	 *
+	 * ⚠️ 放在基类而不是让触发器自己去读，是因为
+	 * `UGameplayAbility::AbilityTriggers` 是 **protected** ——
+	 * 外部代码读不到，只有派生类的成员函数才能访问它。
+	 */
+	bool RespondsToGameplayEvent(FGameplayTag EventTag) const;
+
+protected:
+
 	/**
 	 * 对目标施加伤害。
 	 *

@@ -44,6 +44,7 @@ namespace RPGTags
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Jump,         "Ability.Jump",         "跳跃能力（一次性消耗耐力）");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Heal,         "Ability.Heal",         "治疗能力");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Buff_AttackUp,"Ability.Buff.AttackUp","加攻 Buff 能力");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_ApplyEffect, "Ability.ApplyEffect", "通用施加效果（增益 / 减益共用，具体效果看 GE 的 GrantedTags）");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_StaminaRegen, "Ability.StaminaRegen", "耐力恢复（被动，常驻）");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Death,        "Ability.Death",        "死亡（被动）");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Spell_1,      "Ability.Spell.1",      "法术 1 能力");
@@ -89,6 +90,10 @@ namespace RPGTags
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Event_Character_Invulnerability_Begin, "Event.Character.Invulnerability.Begin", "无敌帧开始");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Event_Character_Invulnerability_End,   "Event.Character.Invulnerability.End",   "无敌帧结束");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Event_Character_StaminaCost,     "Event.Character.StaminaCost",     "动画驱动的耐力消耗");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Event_Item_Heal,                 "Event.Item.Heal",                 "拾取物 / 触发器：治疗");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Event_Item_Buff,                 "Event.Item.Buff",                 "拾取物 / 触发器：增益");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Event_Item_Debuff,               "Event.Item.Debuff",               "拾取物 / 触发器：减益");
 
 	// ══════════════════════════════════════════════════════════════════
 	//  Data（SetByCaller）

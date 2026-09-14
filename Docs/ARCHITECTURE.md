@@ -1470,6 +1470,8 @@ Content/RPG/
 │   ├── IA_Dodge / IA_Spell_1 / IA_Spell_2 / IA_Spell_3
 │   └── DA_RPG_InputConfig
 │
+├── World/          场景效果触发器（治疗/增益/减益的拾取物与区域）
+│
 ├── UI/
 │   ├── WBP_RPG_HUD               主 HUD
 │   ├── WBP_AttributeBar          属性条基座（血/蓝/耐力三个子类共用）

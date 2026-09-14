@@ -91,6 +91,19 @@ namespace RPGTags
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Jump);
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Heal);
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Buff_AttackUp);
+	/**
+	 * 通用"施加效果"能力标签。
+	 *
+	 * ⚠️ 增益和减益**共用这一个**，不要按效果种类各建一个。
+	 * 区分具体是哪种效果靠 **GE 的 GrantedTags**（比如 State.Buff.AttackUp /
+	 * State.Debuff.DefenseDown），那是给动画、UI、驱散逻辑查的；
+	 * 能力标签只是"这个 GA 是干什么的"这个身份，给 GAS 机制（Block / Cancel /
+	 * 调试显示）用。
+	 *
+	 * 原来这里是 Ability_Buff_AttackUp 硬编码 —— 那样一个减防的 GE 会顶着
+	 * "AttackUp" 的标签，日志和调试面板全是误导。
+	 */
+	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_ApplyEffect);
 	/** 被动能力：常驻激活，负责耐力恢复（恢复开关由 State.Stamina.Blocked 控制） */
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_StaminaRegen);
 	/** 被动能力：死亡表现 */
@@ -177,6 +190,26 @@ namespace RPGTags
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Character_Invulnerability_End);
 	/** 动画驱动的耐力消耗（攻击段在某一帧扣耐力） */
 	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Character_StaminaCost);
+
+	// ══════════════════════════════════════════════════════════════════
+	//  Item —— 场景里的效果触发器（拾取物 / 治疗泉 / 毒池 / 陷阱）发出的
+	// ══════════════════════════════════════════════════════════════════
+	// 这些事件由 World/RPG_EffectVolume 在服务器上发给碰到的角色，
+	// 对应的 GA 用 AbilityTriggers 响应（见 GA_Heal / GA_ApplyBuff）。
+	//
+	// ⚠️ 拾取物**不直接施加 GE**，而是发事件让 GA 去施加 ——
+	// 这是项目定的链路：ASC 初始化 → 触发 GA → GE 上 Buff/标签 → GC 特效。
+	// 直接施加的话，消耗、冷却、动画、打断这些就全都没地方放了。
+	//
+	// 拾取物具体发哪个标签由它自己的 TriggerEvent 属性配（BP 里可见），
+	// 所以**新增一种效果不需要改代码**，做一个新 GE + 配一个拾取物就行。
+
+	/** 治疗（回血） */
+	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Item_Heal);
+	/** 增益（加攻 / 加防 / 加速……） */
+	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Item_Buff);
+	/** 减益（减防 / 减速 / 持续掉血……） */
+	RPG_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Event_Item_Debuff);
 
 	// ══════════════════════════════════════════════════════════════════
 	//  Data —— SetByCaller 传参键

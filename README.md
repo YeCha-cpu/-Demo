@@ -6,7 +6,7 @@
 [![引擎](https://img.shields.io/badge/Unreal-5.8-0E1128)](https://www.unrealengine.com/)
 [![语言](https://img.shields.io/badge/C%2B%2B-20-00599C)]()
 [![网络](https://img.shields.io/badge/Networking-L1%20%2B%20L2-4B8BBE)]()
-[![文档](https://img.shields.io/badge/Docs-14%20%E7%AF%87-6A9955)](./Docs/)
+[![文档](https://img.shields.io/badge/Docs-15%20%E7%AF%87-6A9955)](./Docs/)
 
 ---
 
@@ -36,6 +36,7 @@
 | **资源** | 耐力消耗与恢复（停手 3 秒后自动恢复）、生命 / 法力，全部走 GAS 属性 |
 | **敌人 AI** | 视觉感知、行为树（巡逻 / 追击 / 攻击，Latent Task）、受击打断、死亡布娃娃 |
 | **生死流程** | 受击反应、死亡五步编排、布娃娃、玩家/敌人重生 |
+| **场景效果** | 可碰撞的治疗 / 增益 / 减益：药水、卷轴、毒瓶、治疗泉、毒池、陷阱。同一个 C++ 类（`ARPG_EffectVolume`）靠配置覆盖全部玩法 |
 | **战斗 HUD** | 属性条（血/蓝/耐力）+ 攻防数值、招式段名、蓄力条、闪避图标、伤害飘字、头顶血条、死亡面板 |
 | **联机** | L1 基础复制 + L2 权威与预测（Listen Server），单机自动降级 |
 
@@ -114,6 +115,7 @@ git clone <repo-url> RPG
 | 受击 / 死亡 / 重生 | [`PHASE6_HIT_DEATH_SETUP.md`](./Docs/PHASE6_HIT_DEATH_SETUP.md) |
 | 战斗 HUD | [`PHASE7_UI_SETUP.md`](./Docs/PHASE7_UI_SETUP.md) |
 | 联机验证 | [`PHASE8_NETWORKING.md`](./Docs/PHASE8_NETWORKING.md) |
+| 治疗 / 增益 / 减益拾取物 | [`PHASE9_EFFECT_PICKUP_SETUP.md`](./Docs/PHASE9_EFFECT_PICKUP_SETUP.md) |
 
 ### 联机测试
 
@@ -136,6 +138,7 @@ Source/RPG/
 ├── Combat/         战斗规则：输入缓存、战斗状态组件、攻击模组 DataAsset
 ├── Animation/      AnimInstance 基类、AnimNotify 桥接
 ├── AI/             AIController、黑板键常量、行为树装饰器/服务/任务
+├── World/          场景效果触发器（治疗 / 增益 / 减益的拾取物与区域）
 ├── UI/             HUD、属性条、头顶血条、伤害飘字
 └── Interfaces/     只补充引擎接口没有的东西
 ```
@@ -190,8 +193,8 @@ Source/RPG/
 
 | | |
 |---|---|
-| 提交数 | 21 |
-| C++ 源文件 | 101（`.h` + `.cpp`） |
+| 提交数 | 22 |
+| C++ 源文件 | 103（`.h` + `.cpp`） |
 | 引擎 API 查证记录 | `ARCHITECTURE.md` 附录 B，约 60 条 |
 | 独立代码审查 | 2 轮，累计 20 个确认问题（阶段 6 五个 / 阶段 8 十五个） |
 

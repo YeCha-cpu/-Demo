@@ -8,6 +8,7 @@
 #include "Animation/AnimMontage.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
+#include "GameplayEffect.h"
 
 #include "AbilitySystem/RPG_AttributeSet.h"
 #include "Character/RPG_BaseCharacter.h"
@@ -385,4 +386,66 @@ bool URPG_GameplayAbilityBase::HasEnoughStamina(float Amount) const
 	}
 
 	return Attributes->GetStamina() >= Amount;
+}
+
+TSubclassOf<UGameplayEffect> URPG_GameplayAbilityBase::ResolveEffectClassFromEvent(
+	const FGameplayEventData* TriggerEventData,
+	TSubclassOf<UGameplayEffect> Fallback)
+{
+	if (!TriggerEventData || !TriggerEventData->OptionalObject)
+	{
+		return Fallback;
+	}
+
+	// OptionalObject 装的是个 UClass（见头文件的说明）。
+	const UClass* PayloadClass = Cast<UClass>(TriggerEventData->OptionalObject.Get());
+	if (!PayloadClass)
+	{
+		UE_LOG(LogRPG_Ability, Warning,
+			TEXT("事件载荷的 OptionalObject 不是 UClass（实际是 %s）—— 忽略，改用能力自己的默认 GE"),
+			*GetNameSafe(TriggerEventData->OptionalObject.Get()));
+		return Fallback;
+	}
+
+	// 类型校验不能省：这里拿到的是个裸 UClass，编译器帮不上忙。
+	// 不校验的话，把一张蒙太奇配进拾取物的 EffectClass 会一路走到
+	// MakeOutgoingSpec 才失败，报错信息离问题源头很远。
+	if (!PayloadClass->IsChildOf(UGameplayEffect::StaticClass()))
+	{
+		UE_LOG(LogRPG_Ability, Warning,
+			TEXT("事件载荷里带的 %s 不是 UGameplayEffect 的子类 —— 忽略，改用能力自己的默认 GE"),
+			*PayloadClass->GetName());
+		return Fallback;
+	}
+
+	// `OptionalObject` 的类型是 `TObjectPtr<const UObject>`，`.Get()` 出来是 const 指针，
+	// 而 `TSubclassOf` 的构造函数只接非 const 的 `UClass*`。
+	// 这里 const_cast 是安全的：对象本身（一个 UClass）并不是常量，
+	// 只是载荷把它声明成了 const —— 而且我们只读不写。
+	return TSubclassOf<UGameplayEffect>(const_cast<UClass*>(PayloadClass));
+}
+
+float URPG_GameplayAbilityBase::ResolveMagnitudeFromEvent(
+	const FGameplayEventData* TriggerEventData, float Fallback)
+{
+	// <= 0 一律当"没给" —— 理由见头文件。
+	if (TriggerEventData && TriggerEventData->EventMagnitude > 0.f)
+	{
+		return TriggerEventData->EventMagnitude;
+	}
+
+	return Fallback;
+}
+
+bool URPG_GameplayAbilityBase::RespondsToGameplayEvent(FGameplayTag EventTag) const
+{
+	// 只认 `GameplayEvent` 这一种触发源。
+	// 别的触发源（OwnedTagAdded / GameplayTagAdded）语义不同，
+	// 把它们也算作"会响应"会让诊断给出假阳性。
+	return AbilityTriggers.ContainsByPredicate(
+		[EventTag](const FAbilityTriggerData& Trigger)
+		{
+			return Trigger.TriggerTag == EventTag
+				&& Trigger.TriggerSource == EGameplayAbilityTriggerSource::GameplayEvent;
+		});
 }
