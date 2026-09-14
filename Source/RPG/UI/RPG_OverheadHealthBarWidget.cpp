@@ -196,10 +196,37 @@ void URPG_OverheadHealthBarWidget::TryBindToOwnerASC()
 	UWorld* World = GetWorld();
 	UAbilitySystemComponent* ASC = ResolveOwnerASC();
 
-	// 还是同一个人 → 已经接上了，把重试定时器收掉。
+	// ══════════════════════════════════════════════════════════════════
+	//  情形 1：ASC 还没就位 —— 挂上重试，等它出现 ★
+	// ══════════════════════════════════════════════════════════════════
+	// ⚠️⚠️ 这一段**必须**排在下面"主人没变就直接返回"的**前面**。顺序反了就是 bug。
 	//
-	// 这一条不只是优化：重复 AddUObject 会让同一个回调被调两次，
-	// 表现是血条"莫名跳两下"，很难往订阅上想。
+	// 之前是反的：用一个 `ASC == BoundASC.Get()` 同时表达"已经订上了"和
+	// "还没拿到"。而这两件事在**初始状态**下值是一样的 —— 两边都是 null，
+	// 判断成立，于是第一次调用就认定"已接上"并 return，
+	// **重试定时器压根没被挂起来过**，重试逻辑是死代码。
+	//
+	// 后果："能不能订上"完全取决于 Widget 被构造的那一刻 ASC 在不在：
+	//   · 敌人  —— ASC 在自己身上，本地一构造就有        → 订得上
+	//   · 玩家  —— ASC 在 PlayerState 上，要等复制到达   → **订不上**
+	// 于是表现为"客户端看 AI 有血条、看玩家没有"。
+	// 而两次的日志长得一模一样，从日志上分不出区别。
+	//
+	// 教训：**用一个条件同时表达两种状态时，先问"它们在初始值上会不会撞车"。**
+	// null == null 这种撞车在指针判等里是最常见的一种。
+	if (!ASC)
+	{
+		if (World && !World->GetTimerManager().IsTimerActive(BindRetryHandle))
+		{
+			World->GetTimerManager().SetTimer(
+				BindRetryHandle, this, &URPG_OverheadHealthBarWidget::TryBindToOwnerASC,
+				BindRetryInterval, /*bLoop=*/true);
+		}
+		return;
+	}
+
+	// ── 情形 2：主人没变，已经订上了，不用重复绑 ──
+	// 重复 AddUObject 会让同一个回调被调两次，表现是血条"莫名跳两下"。
 	if (ASC == BoundASC.Get())
 	{
 		if (World)
@@ -227,25 +254,9 @@ void URPG_OverheadHealthBarWidget::TryBindToOwnerASC()
 	}
 	BoundASC.Reset();
 
-	if (!ASC)
-	{
-		// ── ASC 还没就位，过会儿再来 ──
-		// 这是**常态**而不是异常：组件 BeginPlay 早于角色的 GAS 初始化，
-		// 所以第一次调用必然是空的。
-		//
-		// 用循环定时器而不是 tick —— 控件此时是 Collapsed 的，
-		// "隐藏的 Widget 还 tick 不 tick"是 Slate 的实现细节，
-		// 把订阅押在那上面会得到一个"不报错但永远不亮"的血条。
-		// 定时器由 TimerManager 驱动，与控件可见性无关。
-		if (World && !World->GetTimerManager().IsTimerActive(BindRetryHandle))
-		{
-			World->GetTimerManager().SetTimer(
-				BindRetryHandle, this, &URPG_OverheadHealthBarWidget::TryBindToOwnerASC,
-				BindRetryInterval, /*bLoop=*/true);
-		}
-		return;
-	}
-
+	// 走到这里 ASC 一定非空 —— 空的那条已经在开头返回了（见"情形 1"）。
+	// 这就是为什么那个 `if (!ASC)` 必须排在最前面：
+	// 放在这里的话，初始状态会被上面的判等提前吃掉，永远走不到。
 	BoundASC = ASC;
 
 	// 引擎自带的属性变化委托，**非动态多播**，所以用 AddUObject 而不是 AddDynamic。
